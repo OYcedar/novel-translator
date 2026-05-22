@@ -7,6 +7,10 @@
 - `terminology_mismatch`: 原文命中术语表，但译文没有使用指定译名。
 - `placeholder_mismatch`: 原文中的占位符没有在译文中原样保留。
 - `epub_markup_risk`: EPUB 段落含 ruby、脚注链接、表格、代码块等复杂标记，导出后需要复核。
+- `style_inconsistency`: 译文存在明显格式或标点风格问题。
+- `dialogue_punctuation`: 对话引号或标点不符合中文小说习惯。
+- `over_literal_translation`: 译文疑似照搬原文或直译过重。
+- `review_required`: 汇总需要审校复核的段落 ID。
 
 ## 处理顺序
 
@@ -15,7 +19,8 @@
 3. 再处理未译段落。pending 较多时继续 `translate`；少量时可人工修复。
 4. 再处理占位符缺失。占位符通常是 `{name}`、`%s`、HTML 标签或脚注锚点，必须原样保留。
 5. 处理 EPUB 标记风险。风险不一定阻止导出，但必须提醒用户在阅读器中复核相关段落。
-6. 最后处理源文残留。确认是人名、拟声词、品牌名等应保留片段时，在术语表或配置中说明；不要全局关闭检查来掩盖漏翻。
+6. 运行 `review-translations --mode risk` 处理风格、对话标点和直译问题；审校建议不自动覆盖译文。
+7. 最后处理源文残留。确认是人名、拟声词、品牌名等应保留片段时，在术语表或配置中说明；不要全局关闭检查来掩盖漏翻。
 
 ## 常见情况
 
@@ -49,6 +54,21 @@ python3 main.py --agent-mode retry-failed --book <书籍ID> --json
 ### 源文残留
 
 查看 `details.source_residual`。不要只因为某个残留看起来“像外文”就删除；先判断它是否是角色名、地名、代码、脚注锚点或 EPUB 协议片段。
+
+### 审校建议
+
+运行：
+
+```bash
+python3 main.py --agent-mode review-translations --book <书籍ID> --mode risk --json
+python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id <审校ID> --output <审校报告.md> --json
+```
+
+审校 JSON 中只有填写了 `approved_translation` 的条目才会被应用：
+
+```bash
+python3 main.py --agent-mode apply-review-fixes --book <书籍ID> --input <审校.json> --json
+```
 
 ## 人工修复命令
 
@@ -87,6 +107,7 @@ python3 main.py --agent-mode translation-status --book <书籍ID> --json
 python3 main.py --agent-mode run-report --book <书籍ID> --json
 python3 main.py --agent-mode terminology-status --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
+python3 main.py --agent-mode review-translations --book <书籍ID> --mode risk --json
 ```
 
 `quality-report` 不是 `ok` 时，可以交付校对版，但必须明确说明剩余风险。

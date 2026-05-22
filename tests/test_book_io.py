@@ -3,15 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 import zipfile
 
+from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book
-from app.config import ContextConfig
+from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig
 from app.context import context_for_batch, context_status, summarize_context
+from app.delivery import package_delivery
 from app.feedback import verify_feedback_text
 from app.manual import export_pending_translations, import_manual_translations, reset_translations
 from app.memory import export_memory, import_memory, load_memory, lookup_memory, remember_translation, terminology_hash
-from app.models import Paragraph, save_book
+from app.models import Paragraph, load_book, save_book
 from app.placeholders import extract_placeholders, placeholder_mismatches
+from app.review import apply_review_fixes, review_translations
 from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, run_report
+from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
 from app.terminology import Term, extract_term_candidates
 from app.translator import validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
@@ -336,6 +340,66 @@ def test_run_report_and_failed_ids(tmp_path: Path) -> None:
     assert latest_failed_paragraph_ids(books_dir, "book") == ["p1", "p2"]
 
 
+def test_analysis_and_translation_plan_report_risks(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text('"Alice opened the door."\n\n"Alice opened the door."\n\nBob smiled.', encoding="utf-8")
+    book = load_txt_book(source, title="Analysis")
+    books_dir = tmp_path / "books"
+    save_book(books_dir, book, source)
+
+    analysis = analyze_book(books_dir, book, [])
+    plan = translation_plan(books_dir, book, [], _quality_config())
+
+    assert analysis["summary"]["duplicate_group_count"] == 1
+    assert analysis["details"]["dialogue_ratio"] > 0
+    assert plan["summary"]["needs_terminology"] is True
+
+
+def test_review_translations_and_apply_fixes(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text('Hello {name}.\n\n"Hi," Alice said.', encoding="utf-8")
+    book = load_txt_book(source, title="Review")
+    books_dir = tmp_path / "books"
+    save_book(books_dir, book, source)
+    book.paragraphs[0].translated = "你好。"
+    book.paragraphs[1].translated = '"你好," Alice said.'
+    config = _app_config(tmp_path)
+
+    review = review_translations(config, book, [], "risk")
+    review_file = Path(review["summary"]["output"])
+    raw = review_file.read_text(encoding="utf-8")
+    raw = raw.replace('"approved_translation": ""', '"approved_translation": "你好{name}。"')
+    review_file.write_text(raw, encoding="utf-8")
+    applied = apply_review_fixes(books_dir, book, review_file)
+
+    assert review["summary"]["items"] >= 1
+    assert applied["summary"]["applied"] >= 1
+    assert book.paragraphs[0].translated == "你好{name}。"
+
+
+def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.\n\nTwo.", encoding="utf-8")
+    book = load_txt_book(source, title="Delivery")
+    books_dir = tmp_path / "books"
+    save_book(books_dir, book, source)
+    book.paragraphs[0].translated = "一。"
+    from app.models import persist_book
+
+    persist_book(books_dir, book)
+    snapshot = create_snapshot(books_dir, book, "before")
+    book.paragraphs[0].translated = "坏译文"
+    persist_book(books_dir, book)
+    restore = restore_snapshot(books_dir, book.id, snapshot["summary"]["snapshot_id"])
+    packaged_book = load_book(books_dir, book.id)
+    package = package_delivery(books_dir, packaged_book, [], _quality_config(), EpubConfig(), tmp_path / "delivery")
+
+    assert list_snapshots(books_dir, book.id)["summary"]["count"] == 1
+    assert restore["summary"]["snapshot"] == snapshot["summary"]["snapshot_id"]
+    assert (tmp_path / "delivery" / "delivery-manifest.json").exists()
+    assert package["summary"]["output_dir"].endswith("delivery")
+
+
 def report_context(books_dir: Path, book_id: str) -> dict:
     from app.context import load_context
 
@@ -346,6 +410,19 @@ def _quality_config():
     from app.config import QualityConfig
 
     return QualityConfig(source_residual_patterns=())
+
+
+def _app_config(tmp_path: Path) -> AppConfig:
+    return AppConfig(
+        root=tmp_path,
+        llm=LlmConfig(base_url="", api_key="", model="test-model"),
+        translation=TranslationConfig(system_prompt_file="prompt.md"),
+        context=ContextConfig(),
+        review=ReviewConfig(),
+        automation=AutomationConfig(),
+        quality=QualityConfig(source_residual_patterns=()),
+        epub=EpubConfig(),
+    )
 
 
 def _write_epub(

@@ -17,6 +17,19 @@ previous_paragraphs = 3
 next_paragraphs = 2
 chapter_summary_max_chars = 1200
 
+[review]
+mode = "risk"
+sample_ratio = 0.05
+max_items_per_run = 200
+severity_threshold = "medium"
+
+[automation]
+workers = 1
+rpm = 30
+tpm = 0
+stop_on_warning = false
+auto_retry_failed = true
+
 [quality]
 source_residual_patterns = [
   "[\\u3040-\\u30ff]+",
@@ -29,3 +42,7 @@ include_non_linear_spine = false
 preserve_outer_markup = true
 warn_on_ruby = true
 warn_on_duplicate_source = true
+translate_nav = true
+translate_toc = true
+preserve_inline_tags = true
+inline_safe_tags = ["span", "strong", "em", "a"]

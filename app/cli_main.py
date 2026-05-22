@@ -7,9 +7,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.analysis import analyze_book as analyze_book_report, translation_plan as translation_plan_report
 from app.book_io import export_epub, export_txt, inspect_epub, load_source_book
 from app.config import AppConfig, EpubConfig, load_config
 from app.context import context_status, load_context, summarize_context
+from app.delivery import export_epub_risk_report, package_delivery
 from app.feedback import verify_feedback_text
 from app.manual import (
     audit_coverage_report,
@@ -31,7 +33,9 @@ from app.memory import (
 from app.models import load_book, persist_book, save_book, slugify
 from app.placeholders import extract_placeholders
 from app.quality import quality_report
-from app.runs import failed_batches, latest_failed_paragraph_ids, new_run_id, record_batch, run_report
+from app.review import apply_review_fixes, export_review_report, review_translations
+from app.runs import export_run_report, failed_batches, latest_failed_paragraph_ids, new_run_id, record_batch, run_report
+from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
 from app.terminology import (
     export_terminology_workspace,
     load_terms,
@@ -94,6 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--dry-run", action="store_true", help="不调用模型，直接把原文写入译文字段")
     translate.add_argument("--no-memory", action="store_true", help="不使用翻译记忆")
     translate.add_argument("--run-id", help="指定本轮运行 ID")
+    translate.add_argument("--workers", type=int)
+    translate.add_argument("--rpm", type=int)
+    translate.add_argument("--tpm", type=int)
+    translate.add_argument("--stop-on-warning", action="store_true")
 
     status = add_common(subparsers.add_parser("translation-status", help="查看翻译进度"), json_flag=True)
     status.add_argument("--book", required=True)
@@ -196,6 +204,54 @@ def build_parser() -> argparse.ArgumentParser:
     retry_parser.add_argument("--run-id")
     retry_parser.add_argument("--dry-run", action="store_true")
 
+    analyze = add_common(subparsers.add_parser("analyze-book", help="生成译前项目画像"), json_flag=True)
+    analyze.add_argument("--book", required=True)
+
+    plan = add_common(subparsers.add_parser("translation-plan", help="生成 Agent 翻译执行计划"), json_flag=True)
+    plan.add_argument("--book", required=True)
+
+    review = add_common(subparsers.add_parser("review-translations", help="审校译文并生成建议"), json_flag=True)
+    review.add_argument("--book", required=True)
+    review.add_argument("--mode", choices=["risk", "sample", "all"])
+
+    apply_review = add_common(subparsers.add_parser("apply-review-fixes", help="应用已批准的审校修复"), json_flag=True)
+    apply_review.add_argument("--book", required=True)
+    apply_review.add_argument("--input", type=Path, required=True)
+
+    review_report = add_common(subparsers.add_parser("export-review-report", help="导出 Markdown 审校报告"), json_flag=True)
+    review_report.add_argument("--book", required=True)
+    review_report.add_argument("--review-id", required=True)
+    review_report.add_argument("--output", type=Path, required=True)
+
+    pipeline = add_common(subparsers.add_parser("run-pipeline", help="运行成熟翻译流水线"), json_flag=True)
+    pipeline.add_argument("--book", required=True)
+    pipeline.add_argument("--export", choices=["txt", "epub"])
+    pipeline.add_argument("--output", type=Path)
+    pipeline.add_argument("--dry-run", action="store_true")
+
+    run_report_export = add_common(subparsers.add_parser("export-run-report", help="导出 Markdown 运行报告"), json_flag=True)
+    run_report_export.add_argument("--book", required=True)
+    run_report_export.add_argument("--output", type=Path, required=True)
+
+    epub_risk = add_common(subparsers.add_parser("export-epub-risk-report", help="导出 EPUB 风险报告"), json_flag=True)
+    epub_risk.add_argument("--book", required=True)
+    epub_risk.add_argument("--output", type=Path, required=True)
+
+    snapshot_cmd = add_common(subparsers.add_parser("snapshot", help="创建译文快照"), json_flag=True)
+    snapshot_cmd.add_argument("--book", required=True)
+    snapshot_cmd.add_argument("--name", required=True)
+
+    list_snapshot_cmd = add_common(subparsers.add_parser("list-snapshots", help="列出译文快照"), json_flag=True)
+    list_snapshot_cmd.add_argument("--book", required=True)
+
+    restore_snapshot_cmd = add_common(subparsers.add_parser("restore-snapshot", help="恢复译文快照"), json_flag=True)
+    restore_snapshot_cmd.add_argument("--book", required=True)
+    restore_snapshot_cmd.add_argument("--snapshot", required=True)
+
+    delivery = add_common(subparsers.add_parser("package-delivery", help="生成交付包"), json_flag=True)
+    delivery.add_argument("--book", required=True)
+    delivery.add_argument("--output-dir", type=Path, required=True)
+
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
     export.add_argument("--book", required=True)
     export.add_argument("--format", choices=["txt", "epub"], required=True)
@@ -297,6 +353,37 @@ def dispatch(args: argparse.Namespace) -> dict:
         return failed_batches(config.books_dir, args.book)
     if args.command == "retry-failed":
         return retry_failed(config, args)
+    if args.command == "analyze-book":
+        book = load_book(config.books_dir, args.book)
+        return analyze_book_report(config.books_dir, book, load_terms(config.books_dir, book.id))
+    if args.command == "translation-plan":
+        book = load_book(config.books_dir, args.book)
+        return translation_plan_report(config.books_dir, book, load_terms(config.books_dir, book.id), config.quality)
+    if args.command == "review-translations":
+        book = load_book(config.books_dir, args.book)
+        return review_translations(config, book, load_terms(config.books_dir, book.id), args.mode)
+    if args.command == "apply-review-fixes":
+        book = load_book(config.books_dir, args.book)
+        return apply_review_fixes(config.books_dir, book, args.input.expanduser().resolve())
+    if args.command == "export-review-report":
+        return export_review_report(config.books_dir, args.book, args.review_id, args.output.expanduser().resolve())
+    if args.command == "run-pipeline":
+        return run_pipeline(config, args)
+    if args.command == "export-run-report":
+        return export_run_report(config.books_dir, args.book, args.output.expanduser().resolve())
+    if args.command == "export-epub-risk-report":
+        book = load_book(config.books_dir, args.book)
+        return export_epub_risk_report(book, args.output.expanduser().resolve())
+    if args.command == "snapshot":
+        book = load_book(config.books_dir, args.book)
+        return create_snapshot(config.books_dir, book, args.name)
+    if args.command == "list-snapshots":
+        return list_snapshots(config.books_dir, args.book)
+    if args.command == "restore-snapshot":
+        return restore_snapshot(config.books_dir, args.book, args.snapshot)
+    if args.command == "package-delivery":
+        book = load_book(config.books_dir, args.book)
+        return package_delivery(config.books_dir, book, load_terms(config.books_dir, book.id), config.quality, config.epub, args.output_dir.expanduser().resolve())
     if args.command == "export":
         return export_book(config, args)
     if args.command == "validate-export":
@@ -412,6 +499,10 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     memory_entries = load_memory(config.books_dir, book.id)
     run_id = args.run_id or new_run_id()
     target_ids = set(getattr(args, "target_ids", []) or [])
+    rpm = int(getattr(args, "rpm", None) or config.automation.rpm)
+    workers = int(getattr(args, "workers", None) or config.automation.workers)
+    tpm = int(getattr(args, "tpm", None) or config.automation.tpm)
+    stop_on_warning = bool(getattr(args, "stop_on_warning", False) or config.automation.stop_on_warning)
     pending = pending_paragraphs(book.paragraphs)
     if target_ids:
         pending = [paragraph for paragraph in pending if paragraph.id in target_ids]
@@ -435,6 +526,8 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     batch_failed = 0
     batch_warnings = []
     for index, batch in enumerate(batches, start=1):
+        if index > 1 and rpm > 0 and not getattr(args, "dry_run", False):
+            time.sleep(max(0, 60 / rpm))
         batch_id = f"{run_id}-b{index:04d}"
         started = time.time()
         result: dict[str, str] = {}
@@ -466,6 +559,9 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
                     warnings=warnings,
                     model=config.llm.model,
                     retry_count=0,
+                    result=result,
+                    memory_hits=0,
+                    rate_limited=False,
                 ),
             )
             continue
@@ -491,11 +587,16 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
                 warnings=warnings,
                 model=config.llm.model,
                 retry_count=0,
+                result=result,
+                memory_hits=0,
+                rate_limited=False,
             ),
         )
         persist_book(config.books_dir, book)
         if not getattr(args, "dry_run", False):
             save_memory(config.books_dir, book.id, memory_entries)
+        if warnings and stop_on_warning:
+            break
     return {
         "status": "ok" if not batch_failed else "warning",
         "warnings": batch_warnings,
@@ -510,6 +611,9 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
             "translated": saved_translations,
             "pending": len(pending_paragraphs(book.paragraphs)),
             "targeted": len(target_ids),
+            "workers": workers,
+            "rpm": rpm,
+            "tpm": tpm,
         },
         "details": {},
     }
@@ -532,13 +636,78 @@ def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
         no_memory=True,
         run_id=args.run_id or new_run_id(),
         target_ids=ids,
+        workers=1,
+        rpm=config.automation.rpm,
+        tpm=config.automation.tpm,
+        stop_on_warning=False,
     )
     report = translate(config, retry_args)
     report["summary"]["retried_ids"] = ids
     return report
 
 
-def _batch_record(batch_id, batch, *, status: str, started: float, error: str, warnings: list[str], model: str, retry_count: int) -> dict:
+def run_pipeline(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    terms = load_terms(config.books_dir, book.id)
+    steps = []
+    warnings = []
+    snapshot_report = create_snapshot(config.books_dir, book, "pipeline-start")
+    steps.append({"step": "snapshot", "status": snapshot_report["status"], "summary": snapshot_report["summary"]})
+    analysis = analyze_book_report(config.books_dir, book, terms)
+    steps.append({"step": "analyze-book", "status": analysis["status"], "summary": analysis["summary"]})
+    plan = translation_plan_report(config.books_dir, book, terms, config.quality)
+    steps.append({"step": "translation-plan", "status": plan["status"], "summary": plan["summary"]})
+    if plan.get("warnings"):
+        warnings.extend(plan["warnings"])
+    context = context_status(config.books_dir, book)
+    if context["status"] != "ok":
+        context = summarize_context(config.books_dir, book, config.context, config.llm)
+    steps.append({"step": "context", "status": context["status"], "summary": context["summary"]})
+    translate_args = argparse.Namespace(
+        book=book.id,
+        max_batches=None,
+        dry_run=args.dry_run,
+        no_memory=False,
+        run_id=new_run_id(),
+        workers=config.automation.workers,
+        rpm=config.automation.rpm,
+        tpm=config.automation.tpm,
+        stop_on_warning=config.automation.stop_on_warning,
+    )
+    translated = translate(config, translate_args)
+    steps.append({"step": "translate", "status": translated["status"], "summary": translated["summary"]})
+    if config.automation.auto_retry_failed:
+        retry_args = argparse.Namespace(book=book.id, run_id=new_run_id(), dry_run=args.dry_run)
+        retry = retry_failed(config, retry_args)
+        steps.append({"step": "retry-failed", "status": retry["status"], "summary": retry["summary"]})
+    book = load_book(config.books_dir, book.id)
+    quality = quality_report(book, config.quality, terms)
+    steps.append({"step": "quality-report", "status": quality["status"], "summary": quality["summary"]})
+    review = review_translations(config, book, terms, "risk")
+    steps.append({"step": "review-translations", "status": review["status"], "summary": review["summary"]})
+    export_validation = None
+    if args.export:
+        validation_args = argparse.Namespace(book=book.id, format=args.export)
+        export_validation = validate_export(config, validation_args)
+        steps.append({"step": "validate-export", "status": export_validation["status"], "summary": export_validation["summary"]})
+        if export_validation["status"] != "error":
+            output = args.output.expanduser().resolve() if args.output else config.root / f"{book.id}.{args.export}"
+            export_args = argparse.Namespace(book=book.id, format=args.export, output=output, bilingual=False)
+            exported = export_book(config, export_args)
+            steps.append({"step": "export", "status": exported["status"], "summary": exported["summary"]})
+    status = "error" if any(step["status"] == "error" for step in steps) else ("warning" if warnings or any(step["status"] == "warning" for step in steps) else "ok")
+    return {
+        "status": status,
+        "warnings": warnings,
+        "summary": {"book": book.id, "steps": len(steps), "snapshot": snapshot_report["summary"].get("snapshot_id", "")},
+        "details": {"steps": steps},
+    }
+
+
+def _batch_record(batch_id, batch, *, status: str, started: float, error: str, warnings: list[str], model: str, retry_count: int, result: dict[str, str] | None = None, memory_hits: int = 0, rate_limited: bool = False) -> dict:
+    result = result or {}
+    input_chars = sum(len(paragraph.source) for paragraph in batch)
+    output_chars = sum(len(result.get(paragraph.id, "")) for paragraph in batch)
     return {
         "batch_id": batch_id,
         "status": status,
@@ -547,6 +716,12 @@ def _batch_record(batch_id, batch, *, status: str, started: float, error: str, w
         "model": model,
         "duration_seconds": round(time.time() - started, 3),
         "retry_count": retry_count,
+        "input_chars": input_chars,
+        "output_chars": output_chars,
+        "estimated_tokens": max(1, round((input_chars + output_chars) / 2)),
+        "memory_hits": memory_hits,
+        "rate_limited": rate_limited,
+        "cost_estimate": 0,
         "error": error,
         "warnings": warnings,
     }

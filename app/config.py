@@ -36,6 +36,23 @@ class ContextConfig:
 
 
 @dataclass(frozen=True)
+class ReviewConfig:
+    mode: str = "risk"
+    sample_ratio: float = 0.05
+    max_items_per_run: int = 200
+    severity_threshold: str = "medium"
+
+
+@dataclass(frozen=True)
+class AutomationConfig:
+    workers: int = 1
+    rpm: int = 30
+    tpm: int = 0
+    stop_on_warning: bool = False
+    auto_retry_failed: bool = True
+
+
+@dataclass(frozen=True)
 class QualityConfig:
     source_residual_patterns: tuple[str, ...] = ()
 
@@ -47,6 +64,10 @@ class EpubConfig:
     preserve_outer_markup: bool = True
     warn_on_ruby: bool = True
     warn_on_duplicate_source: bool = True
+    translate_nav: bool = True
+    translate_toc: bool = True
+    preserve_inline_tags: bool = True
+    inline_safe_tags: tuple[str, ...] = ("span", "strong", "em", "a")
 
 
 @dataclass(frozen=True)
@@ -55,6 +76,8 @@ class AppConfig:
     llm: LlmConfig
     translation: TranslationConfig
     context: ContextConfig
+    review: ReviewConfig
+    automation: AutomationConfig
     quality: QualityConfig
     epub: EpubConfig
 
@@ -83,6 +106,8 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     llm_raw = raw.get("llm", {})
     translation_raw = raw.get("translation", {})
     context_raw = raw.get("context", {})
+    review_raw = raw.get("review", {})
+    automation_raw = raw.get("automation", {})
     quality_raw = raw.get("quality", {})
     epub_raw = raw.get("epub", {})
     llm = LlmConfig(
@@ -109,14 +134,31 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         next_paragraphs=int(context_raw.get("next_paragraphs", 2)),
         chapter_summary_max_chars=int(context_raw.get("chapter_summary_max_chars", 1200)),
     )
+    review = ReviewConfig(
+        mode=str(review_raw.get("mode", "risk")),
+        sample_ratio=float(review_raw.get("sample_ratio", 0.05)),
+        max_items_per_run=int(review_raw.get("max_items_per_run", 200)),
+        severity_threshold=str(review_raw.get("severity_threshold", "medium")),
+    )
+    automation = AutomationConfig(
+        workers=int(automation_raw.get("workers", 1)),
+        rpm=int(automation_raw.get("rpm", 30)),
+        tpm=int(automation_raw.get("tpm", 0)),
+        stop_on_warning=bool(automation_raw.get("stop_on_warning", False)),
+        auto_retry_failed=bool(automation_raw.get("auto_retry_failed", True)),
+    )
     epub = EpubConfig(
         parser=str(epub_raw.get("parser", "auto")),
         include_non_linear_spine=bool(epub_raw.get("include_non_linear_spine", False)),
         preserve_outer_markup=bool(epub_raw.get("preserve_outer_markup", True)),
         warn_on_ruby=bool(epub_raw.get("warn_on_ruby", True)),
         warn_on_duplicate_source=bool(epub_raw.get("warn_on_duplicate_source", True)),
+        translate_nav=bool(epub_raw.get("translate_nav", True)),
+        translate_toc=bool(epub_raw.get("translate_toc", True)),
+        preserve_inline_tags=bool(epub_raw.get("preserve_inline_tags", True)),
+        inline_safe_tags=tuple(str(item) for item in epub_raw.get("inline_safe_tags", ["span", "strong", "em", "a"])),
     )
-    return AppConfig(root=root, llm=llm, translation=translation, context=context, quality=quality, epub=epub)
+    return AppConfig(root=root, llm=llm, translation=translation, context=context, review=review, automation=automation, quality=quality, epub=epub)
 
 
 def load_toml(path: Path) -> dict:

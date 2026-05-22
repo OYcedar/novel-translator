@@ -14,6 +14,10 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
     terminology_mismatch = []
     placeholder_mismatch = []
     epub_markup_risk = []
+    style_inconsistency = []
+    dialogue_punctuation = []
+    over_literal_translation = []
+    review_required = []
     patterns = [re.compile(pattern) for pattern in config.source_residual_patterns]
     glossary = terms or []
     for paragraph in book.paragraphs:
@@ -49,7 +53,18 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             if pattern.search(paragraph.translated):
                 residual.append({"id": paragraph.id, "pattern": pattern.pattern, "text": paragraph.translated})
                 break
-    status = "ok" if not untranslated and not residual and not terminology_mismatch and not placeholder_mismatch and not epub_markup_risk else "warning"
+        if _dialogue_punctuation_issue(paragraph.source, paragraph.translated):
+            dialogue_punctuation.append({"id": paragraph.id, "text": paragraph.translated})
+        if _over_literal_issue(paragraph.source, paragraph.translated):
+            over_literal_translation.append({"id": paragraph.id, "text": paragraph.translated})
+        if _style_issue(paragraph.translated):
+            style_inconsistency.append({"id": paragraph.id, "text": paragraph.translated})
+    review_ids = set()
+    for collection in (residual, terminology_mismatch, placeholder_mismatch, epub_markup_risk, style_inconsistency, dialogue_punctuation, over_literal_translation):
+        for item in collection:
+            review_ids.add(item["id"])
+    review_required = sorted(review_ids)
+    status = "ok" if not untranslated and not residual and not terminology_mismatch and not placeholder_mismatch and not epub_markup_risk and not style_inconsistency and not dialogue_punctuation and not over_literal_translation else "warning"
     return {
         "status": status,
         "warnings": [],
@@ -62,6 +77,10 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             "terminology_mismatch": len(terminology_mismatch),
             "placeholder_mismatch": len(placeholder_mismatch),
             "epub_markup_risk": len(epub_markup_risk),
+            "style_inconsistency": len(style_inconsistency),
+            "dialogue_punctuation": len(dialogue_punctuation),
+            "over_literal_translation": len(over_literal_translation),
+            "review_required": len(review_required),
         },
         "details": {
             "untranslated": untranslated[:100],
@@ -69,5 +88,29 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             "terminology_mismatch": terminology_mismatch[:100],
             "placeholder_mismatch": placeholder_mismatch[:100],
             "epub_markup_risk": epub_markup_risk[:100],
+            "style_inconsistency": style_inconsistency[:100],
+            "dialogue_punctuation": dialogue_punctuation[:100],
+            "over_literal_translation": over_literal_translation[:100],
+            "review_required": review_required[:100],
         },
     }
+
+
+def _dialogue_punctuation_issue(source: str, translated: str) -> bool:
+    has_dialogue = any(mark in source for mark in ('"', "“", "「", "『"))
+    if not has_dialogue:
+        return False
+    return '"' in translated or translated.count("“") != translated.count("”")
+
+
+def _over_literal_issue(source: str, translated: str) -> bool:
+    if not source or not translated:
+        return False
+    if source.strip() == translated.strip():
+        return True
+    ascii_letters = sum(1 for char in translated if ("A" <= char <= "Z") or ("a" <= char <= "z"))
+    return len(translated) > 10 and ascii_letters / max(len(translated), 1) > 0.35
+
+
+def _style_issue(translated: str) -> bool:
+    return "  " in translated or "。。" in translated or "，，" in translated

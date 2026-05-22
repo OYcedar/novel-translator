@@ -1,6 +1,6 @@
 ---
 name: novel-translator
-description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小说、准备 Agent 工作区、导出/导入术语表、生成章节上下文、使用翻译记忆和批次恢复调用 OpenAI 兼容模型翻译、检查质量、人工修复、反馈反查，并导出 TXT 或 EPUB 译本。
+description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小说、译前分析、准备 Agent 工作区、导出/导入术语表、生成章节上下文、使用翻译记忆和批次恢复调用 OpenAI 兼容模型翻译、审校质量、人工修复、反馈反查，并打包交付 TXT 或 EPUB 译本。
 ---
 
 # Novel Translator Skill
@@ -34,26 +34,30 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 2. 如果源文件是 EPUB，先运行 `inspect-epub --path <小说文件> --json`，查看 spine、nav/toc、重复文本和标记风险。
 3. 运行 `add-book --path <小说文件> --json` 注册小说，记录 `<书籍ID>`。
 4. 运行 `text-scope --book <书籍ID> --json`，确认章节数和段落数合理。
-5. 运行 `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
-6. 阅读 `terminology-workflow.md`，填写或审查 `<工作区>/terminology/glossary.json`。删除误判候选，补全人名、地名、组织名、能力名等稳定译名。
-7. 运行 `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
-8. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
-9. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
-10. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
-11. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
-12. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
-13. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
-14. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`。术语表变更后可继续使用默认翻译记忆；记忆命中会检查当前术语 hash。需要强制重译时传 `--no-memory`。
-15. 直到 `pending` 为 0 后，再跑 `run-report` 和 `quality-report`。未译、失败批次、源文残留、术语不一致、占位符缺失或 EPUB 标记风险必须处理或向用户说明。
-16. 质量问题较少时，使用 `export-quality-fix` 导出修复表，人工填写 `translated` 后用 `import-manual-translations` 导入；坏译文用 `reset-translations` 精确清空。
-17. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
-18. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`。TXT 用 `export --book <书籍ID> --format txt --output <输出.txt> --json`；EPUB 源书才可用 `--format epub`。
+5. 运行 `analyze-book --book <书籍ID> --json` 生成译前项目画像，再运行 `translation-plan --book <书籍ID> --json` 获取执行建议。
+6. 运行 `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
+7. 阅读 `terminology-workflow.md`，填写或审查 `<工作区>/terminology/glossary.json`。删除误判候选，补全人名、地名、组织名、能力名等稳定译名。
+8. 运行 `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
+9. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
+10. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
+11. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
+12. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
+13. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
+14. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
+15. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
+16. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
+17. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
+18. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
+19. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`，并优先用 `package-delivery --book <书籍ID> --output-dir <目录> --json` 生成交付包。
 
 ## 硬门槛
 
 - 未完成术语导入前，不启动真实模型翻译，除非用户明确要求跳过术语流程。
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
 - `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
+- 交付前 `run-report.summary.failed` 必须为 0，`validate-export` 不能是 `error`。
+- EPUB 有 `epub_markup_risk` 时，交付包必须包含 `export-epub-risk-report` 生成的风险报告。
+- 审校建议不能自动覆盖译文；只有 `approved_translation` 通过 `apply-review-fixes` 验证后才算应用。
 - 长篇小说建议先生成章节上下文；`context-status` 缺摘要时，只能小批量试翻或向用户说明风险。
 - 有失败批次时，先 `retry-failed` 或导出人工修复表，不要直接进入最终导出。
 - 翻译记忆命中必须匹配当前术语 hash；如果用户刚改过术语，先看 `translation-memory-status`，必要时用 `--no-memory` 强制重译。

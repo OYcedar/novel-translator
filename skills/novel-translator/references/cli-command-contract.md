@@ -24,6 +24,8 @@ python3 main.py --agent-mode <命令> ...
 | `add-book --path <小说文件> --title <标题> --id <ID> --json` | 用指定标题和 ID 注册小说 | `summary.book` 等于规范化 ID | ID 冲突时确认是否覆盖当前本地缓存 |
 | `list --json` | 列出已注册小说 | `details.books` 可读 | 未注册时先 `add-book` |
 | `text-scope --book <书籍ID> --json` | 查看章节和段落范围 | 段落数合理 | EPUB 章节缺失时先检查源文件 |
+| `analyze-book --book <书籍ID> --json` | 生成译前项目画像 | `summary.paragraphs` 和风险统计可解释 | 先注册书籍后重跑 |
+| `translation-plan --book <书籍ID> --json` | 生成 Agent 执行建议 | `details.actions` 可执行 | 按 warning 补术语或上下文 |
 
 ## 术语
 
@@ -51,6 +53,7 @@ python3 main.py --agent-mode <命令> ...
 | --- | --- | --- | --- |
 | `translate --book <书籍ID> --max-batches 1 --json` | 小批量真实翻译 | `summary.batch_failed` 为 0，pending 下降 | 看 run-report 和质量报告，不盲目全量 |
 | `translate --book <书籍ID> --json` | 继续翻译所有未译段落，默认使用翻译记忆 | pending 持续下降 | 停滞时检查模型配置、术语、失败批次或手动处理 |
+| `translate --book <书籍ID> --workers <N> --rpm <N> --stop-on-warning --json` | 带并发配置、限速和 warning 闸门翻译 | run-report 记录 chars/token/限速字段 | 触发 warning 时先修质量问题 |
 | `translate --book <书籍ID> --no-memory --json` | 绕过翻译记忆强制请求模型 | 用于术语大改后的重译 | 成本更高，先确认用户意图 |
 | `translate --book <书籍ID> --dry-run --json` | 不调用模型，把原文写入译文字段验证流程 | 只用于测试流程 | 不得当真实译文交付 |
 | `translation-memory-status --book <书籍ID> --json` | 查看翻译记忆数量和当前术语 hash 可复用数量 | `summary.reusable_entries` 可解释 | 术语变更后可复用数降低是正常现象 |
@@ -59,6 +62,8 @@ python3 main.py --agent-mode <命令> ...
 | `run-report --book <书籍ID> --json` | 查看翻译运行和批次统计 | 最终交付前 failed 应为 0 | 有失败批次先 retry-failed 或人工修复 |
 | `failed-batches --book <书籍ID> --json` | 列出失败批次明细 | `summary.failed` 可解释 | 结合错误原因修配置或重试 |
 | `retry-failed --book <书籍ID> --json` | 只重试失败批次对应段落 | batch_failed 下降或 pending 下降 | 仍失败时导出人工修复表 |
+| `run-pipeline --book <书籍ID> --json` | 执行快照、分析、计划、上下文、翻译、重试、质量和审校流水线 | `details.steps` 全部可解释 | warning 必须进入修复或说明 |
+| `export-run-report --book <书籍ID> --output <报告.md> --json` | 导出 Markdown 运行报告 | 输出文件存在 | 用于交付包或人工复核 |
 | `translation-status --book <书籍ID> --json` | 查看总数、已译、待译和进度 | 数量可解释 | pending 不下降时排查翻译请求 |
 | `quality-report --book <书籍ID> --json` | 检查未译、源文残留、术语不一致和占位符缺失 | 最终交付前应为 `ok` | 按 details 修译文、术语或占位符 |
 
@@ -72,6 +77,12 @@ python3 main.py --agent-mode <命令> ...
 | `reset-translations --book <书籍ID> --input <文件> --json` | 精确清空坏译文 | `summary.reset` 可解释 | 输入 ID 不存在会整体失败 |
 | `reset-translations --book <书籍ID> --all --json` | 全量清空译文 | 用户明确要求完整重译时才用 | 不要和 `--input` 同时用 |
 | `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` | 按反馈文本反查原文/译文段落 | 命中分类可解释 | `not_found` 需让用户补上下文或截图文字 |
+| `review-translations --book <书籍ID> --mode risk|sample|all --json` | 生成审校建议，不直接改译文 | `summary.review_id` 可用于导出报告 | 风险段落先用 risk |
+| `apply-review-fixes --book <书籍ID> --input <审校.json> --json` | 应用 approved_translation | `summary.applied` 可解释 | 未知 ID、空译文、占位符缺失会失败 |
+| `export-review-report --book <书籍ID> --review-id <ID> --output <报告.md> --json` | 导出 Markdown 审校报告 | 输出文件存在 | 交付前建议保留 |
+| `snapshot --book <书籍ID> --name <名称> --json` | 创建译文快照 | 返回 snapshot_id | 重大修复前先跑 |
+| `list-snapshots --book <书籍ID> --json` | 列出快照 | count 可解释 | 无快照时先 snapshot |
+| `restore-snapshot --book <书籍ID> --snapshot <ID> --json` | 恢复快照 manifest | 段落数可解释 | 恢复前确认用户意图 |
 
 ## 导出
 
@@ -81,5 +92,7 @@ python3 main.py --agent-mode <命令> ...
 | `export --book <书籍ID> --format txt --output <文件> --bilingual --json` | 导出双语 TXT | 输出文件包含原文和译文 | 仅用于校对，不一定适合发布 |
 | `export --book <书籍ID> --format epub --output <文件> --json` | 导出 EPUB 译本 | 源书为 EPUB 且输出文件存在 | TXT 书不能导出 EPUB；复杂排版需人工复核 |
 | `validate-export --book <书籍ID> --format txt|epub --json` | 导出前检查 pending、质量和 EPUB 标记风险 | 最终交付前应为 `ok` | warning 需要解释；error 必须修复 |
+| `export-epub-risk-report --book <书籍ID> --output <报告.md> --json` | 导出 EPUB 标记风险报告 | EPUB 风险段落数量可解释 | EPUB 有风险时交付包必须包含 |
+| `package-delivery --book <书籍ID> --output-dir <目录> --json` | 生成译本、质量报告、运行报告、术语和元数据交付包 | 目录含 delivery-manifest.json | warning 必须在交付说明中解释 |
 
 EPUB 导出按导入时保存的 `chapter_path`、`node_index` 和 `text_hash` 回写。遇到节点失效或 hash 不一致时，导出会 warning 并保留原文，不能把这类输出称为最终版。

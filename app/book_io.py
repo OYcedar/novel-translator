@@ -133,6 +133,7 @@ def inspect_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
         ]
         image_count = sum(1 for item in manifest.values() if str(item.get("media-type", "")).startswith("image/"))
         css_count = sum(1 for item in manifest.values() if item.get("media-type") == "text/css")
+        image_alt_title_count = 0
         chapter_stats = []
         duplicate_counter: Counter[str] = Counter()
         parser_mode = _select_parser_mode(config)
@@ -145,6 +146,7 @@ def inspect_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
             stats = _inspect_chapter_bytes(archive.read(spine_item.path), spine_item.path, config)
             chapter_stats.append(stats)
             duplicate_counter.update(stats["texts"])
+            image_alt_title_count += int(stats.get("image_alt_title_count", 0))
             warning_count += len(stats["warnings"])
         duplicate_text_count = sum(1 for _, count in duplicate_counter.items() if count > 1)
         if duplicate_text_count and config.warn_on_duplicate_source:
@@ -160,6 +162,8 @@ def inspect_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
             "linear_spine_count": len([item for item in all_spine_items if item.linear]),
             "non_linear_spine_count": len([item for item in all_spine_items if not item.linear]),
             "html_files": html_files,
+            "nav_rewrite_supported": bool(nav_path),
+            "toc_rewrite_supported": bool(toc_path),
             "chapter_stats": [
                 {key: value for key, value in stats.items() if key != "texts"}
                 for stats in chapter_stats
@@ -182,6 +186,11 @@ def inspect_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
             "paragraph_count": sum(int(stats["paragraph_count"]) for stats in chapter_stats),
             "ruby_count": sum(int(stats["ruby_count"]) for stats in chapter_stats),
             "link_count": sum(int(stats["link_count"]) for stats in chapter_stats),
+            "footnote_link_count": sum(int(stats.get("footnote_link_count", 0)) for stats in chapter_stats),
+            "inline_complexity": sum(int(stats.get("inline_complexity", 0)) for stats in chapter_stats),
+            "image_alt_title_count": image_alt_title_count,
+            "nav_rewrite_supported": bool(nav_path),
+            "toc_rewrite_supported": bool(toc_path),
             "duplicate_text_count": duplicate_text_count,
             "warning_count": warning_count + len(warnings),
         },
@@ -475,14 +484,20 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None)
     output.parent.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     by_chapter = {chapter.source_path: chapter for chapter in book.chapters}
+    title_translations = _chapter_title_translations(book)
     source = Path(book.source_file)
     with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(output, "w") as dst:
+        nav_path = book.metadata.get("epub", {}).get("nav_path", "")
+        toc_path = book.metadata.get("epub", {}).get("toc_path", "")
         for info in src.infolist():
             data = src.read(info.filename)
             chapter = by_chapter.get(info.filename)
             if chapter is not None:
                 data, chapter_warnings = _replace_chapter_by_locator(data, chapter, config)
                 warnings.extend(f"{info.filename}: {message}" for message in chapter_warnings)
+            elif title_translations and ((config.translate_nav and info.filename == nav_path) or (config.translate_toc and info.filename == toc_path)):
+                data, nav_warnings = _replace_navigation_text(data, title_translations)
+                warnings.extend(f"{info.filename}: {message}" for message in nav_warnings)
             dst.writestr(info, data)
     return {"warnings": warnings, "warning_count": len(warnings)}
 
@@ -492,7 +507,7 @@ def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfi
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
-        soup_result = _replace_chapter_by_locator_with_soup(data, chapter)
+        soup_result = _replace_chapter_by_locator_with_soup(data, chapter, config)
         if soup_result is not None:
             return soup_result
         return data, ["章节 XML 无法解析，且增强解析器不可用，已保留原文"]
@@ -511,11 +526,11 @@ def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfi
         if expected_hash and _text_hash(source_text) != expected_hash:
             warnings.append(f"{paragraph.id} 节点原文 hash 不一致，已保留原文")
             continue
-        _set_element_text(element, paragraph.translated, preserve_outer_markup=config.preserve_outer_markup)
+        _set_element_text(element, paragraph.translated, config=config)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True), warnings
 
 
-def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter) -> tuple[bytes, list[str]] | None:
+def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter, config: EpubConfig) -> tuple[bytes, list[str]] | None:
     soup = _soup(data)
     if soup is None:
         return None
@@ -535,13 +550,27 @@ def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter) -> tupl
         if expected_hash and _text_hash(source_text) != expected_hash:
             warnings.append(f"{paragraph.id} 节点原文 hash 不一致，已保留原文")
             continue
-        node.clear()
-        node.string = paragraph.translated
+        if getattr(config, "preserve_inline_tags", False) and _soup_node_inline_safe(node, set(config.inline_safe_tags)):
+            for child in node.find_all(True):
+                child.string = ""
+            node.insert(0, paragraph.translated)
+        else:
+            node.clear()
+            node.string = paragraph.translated
     return str(soup).encode("utf-8"), warnings
 
 
-def _set_element_text(element: ET.Element, text: str, *, preserve_outer_markup: bool) -> None:
-    attrib = dict(element.attrib) if preserve_outer_markup else {}
+def _set_element_text(element: ET.Element, text: str, *, config: EpubConfig) -> None:
+    attrib = dict(element.attrib) if config.preserve_outer_markup else {}
+    children = list(element)
+    if config.preserve_inline_tags and children and _inline_children_safe(element, set(config.inline_safe_tags)):
+        element.text = text
+        element.attrib.clear()
+        element.attrib.update(attrib)
+        for child in children:
+            child.text = ""
+            child.tail = ""
+        return
     element.clear()
     element.attrib.update(attrib)
     element.text = text
@@ -557,6 +586,9 @@ def _inspect_chapter_bytes(data: bytes, path: str, config: EpubConfig) -> dict:
         texts = [_element_text(node) for node in nodes]
         link_count = sum(1 for element in root.iter() if _local_name(element.tag) == "a")
         ruby_count = sum(1 for element in root.iter() if _local_name(element.tag) == "ruby")
+        footnote_link_count = sum(1 for element in root.iter() if _local_name(element.tag) == "a" and _looks_like_footnote(element.attrib.get("href", "")))
+        inline_complexity = sum(len([child for child in node.iter() if child is not node]) for node in nodes)
+        image_alt_title_count = sum(1 for element in root.iter() if _local_name(element.tag) == "img" and (element.attrib.get("alt") or element.attrib.get("title")))
     except ET.ParseError as error:
         soup = _soup(data)
         if soup is None:
@@ -569,6 +601,9 @@ def _inspect_chapter_bytes(data: bytes, path: str, config: EpubConfig) -> dict:
                 "empty": True,
                 "used_fallback_parser": False,
                 "warnings": [f"章节无法用标准库解析：{error}，增强解析器不可用"],
+                "footnote_link_count": 0,
+                "inline_complexity": 0,
+                "image_alt_title_count": 0,
                 "texts": [],
             }
         used_fallback_parser = True
@@ -577,6 +612,9 @@ def _inspect_chapter_bytes(data: bytes, path: str, config: EpubConfig) -> dict:
         texts = [_normalize_text(node.get_text(" ")) for node in nodes]
         link_count = len(soup.find_all("a"))
         ruby_count = len(soup.find_all("ruby"))
+        footnote_link_count = len([node for node in soup.find_all("a") if _looks_like_footnote(str(node.attrs.get("href", "")))])
+        inline_complexity = sum(len(node.find_all(True)) for node in nodes)
+        image_alt_title_count = len([node for node in soup.find_all("img") if node.attrs.get("alt") or node.attrs.get("title")])
         warnings.append("章节使用增强解析器处理")
     risk_count = sum(1 for item in risks if item)
     if ruby_count and config.warn_on_ruby:
@@ -586,6 +624,9 @@ def _inspect_chapter_bytes(data: bytes, path: str, config: EpubConfig) -> dict:
         "paragraph_count": len([text for text in texts if text]),
         "ruby_count": ruby_count,
         "link_count": link_count,
+        "footnote_link_count": footnote_link_count,
+        "inline_complexity": inline_complexity,
+        "image_alt_title_count": image_alt_title_count,
         "risk_count": risk_count,
         "empty": not any(texts),
         "used_fallback_parser": used_fallback_parser,
@@ -646,3 +687,56 @@ def _local_name(tag: str) -> str:
 def _text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+
+def _chapter_title_translations(book: Book) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for chapter in book.chapters:
+        if chapter.paragraphs and chapter.paragraphs[0].translated and chapter.paragraphs[0].source == chapter.title:
+            mapping[chapter.title] = chapter.paragraphs[0].translated
+        for paragraph in chapter.paragraphs:
+            epub = paragraph.metadata.get("epub", {})
+            if epub.get("node_tag") in {"h1", "h2", "h3", "h4", "h5", "h6"} and paragraph.translated:
+                mapping[paragraph.source] = paragraph.translated
+    return mapping
+
+
+def _replace_navigation_text(data: bytes, title_translations: dict[str, str]) -> tuple[bytes, list[str]]:
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        soup = _soup(data)
+        if soup is None:
+            return data, ["导航文件无法解析，已保留原文"]
+        changed = 0
+        for node in soup.find_all(["a", "span", "text"]):
+            text = _normalize_text(node.get_text(" "))
+            if text in title_translations:
+                node.clear()
+                node.string = title_translations[text]
+                changed += 1
+        return str(soup).encode("utf-8"), [] if changed else []
+    changed = 0
+    for element in root.iter():
+        text = _element_text(element)
+        if text in title_translations and not list(element):
+            element.text = title_translations[text]
+            changed += 1
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True), [] if changed else []
+
+
+def _inline_children_safe(element: ET.Element, safe_tags: set[str]) -> bool:
+    for child in element.iter():
+        if child is element:
+            continue
+        if _local_name(child.tag) not in safe_tags:
+            return False
+    return True
+
+
+def _soup_node_inline_safe(node, safe_tags: set[str]) -> bool:
+    return all(getattr(child, "name", "") in safe_tags for child in node.find_all(True))
+
+
+def _looks_like_footnote(href: str) -> bool:
+    value = href.lower()
+    return "note" in value or "foot" in value or value.startswith("#fn") or value.startswith("#note")

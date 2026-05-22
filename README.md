@@ -34,6 +34,7 @@ python3 main.py --agent-mode inspect-epub --path ./novel.epub --json
 python3 main.py --agent-mode add-book --path ./novel.epub --json
 python3 main.py --agent-mode list --json
 python3 main.py --agent-mode text-scope --book <书籍ID> --json
+python3 main.py --agent-mode analyze-book --book <书籍ID> --json
 python3 main.py --agent-mode export-terminology --book <书籍ID> --output-dir ./workspace --json
 python3 main.py --agent-mode import-terminology --book <书籍ID> --input ./workspace/terminology/glossary.json --json
 python3 main.py --agent-mode terminology-status --book <书籍ID> --json
@@ -42,10 +43,15 @@ python3 main.py --agent-mode validate-agent-workspace --book <书籍ID> --worksp
 python3 main.py --agent-mode audit-coverage --book <书籍ID> --json
 python3 main.py --agent-mode summarize-context --book <书籍ID> --json
 python3 main.py --agent-mode context-status --book <书籍ID> --json
-python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --json
+python3 main.py --agent-mode translation-plan --book <书籍ID> --json
+python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --workers 1 --rpm 30 --json
 python3 main.py --agent-mode run-report --book <书籍ID> --json
+python3 main.py --agent-mode export-run-report --book <书籍ID> --output ./run-report.md --json
 python3 main.py --agent-mode failed-batches --book <书籍ID> --json
 python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+python3 main.py --agent-mode review-translations --book <书籍ID> --mode risk --json
+python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id <审校ID> --output ./review.md --json
+python3 main.py --agent-mode snapshot --book <书籍ID> --name before-final --json
 python3 main.py --agent-mode translation-memory-status --book <书籍ID> --json
 python3 main.py --agent-mode translation-status --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
@@ -54,6 +60,9 @@ python3 main.py --agent-mode export-quality-fix --book <书籍ID> --output ./qua
 python3 main.py --agent-mode import-manual-translations --book <书籍ID> --input ./manual.json --json
 python3 main.py --agent-mode reset-translations --book <书籍ID> --input ./reset.json --json
 python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input ./feedback.txt --json
+python3 main.py --agent-mode export-epub-risk-report --book <书籍ID> --output ./epub-risk.md --json
+python3 main.py --agent-mode run-pipeline --book <书籍ID> --json
+python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json
 python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json
 python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json
 python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json
@@ -78,20 +87,21 @@ skills/novel-translator/SKILL.md
 1. `doctor --json` 检查配置。
 2. `add-book --path <小说文件> --json` 注册小说，记录返回的书籍 ID。
 3. `text-scope --book <书籍ID> --json` 确认章节和段落数量。
-4. `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
-5. 人工或 Agent 填写 `<工作区>/terminology/glossary.json` 里的 `target`，删除不需要的候选，统一人名、地名、组织名、能力名等译名。
-6. `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
-7. `terminology-status --book <书籍ID> --json` 确认没有冲突；空译名会作为 warning。
-8. `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 导出完整 Agent 工作区。
-9. `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json` 验收工作区。
-10. `audit-coverage --book <书籍ID> --json` 查看覆盖范围和可导出格式。
-11. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再用 `context-status` 确认章节上下文齐全。
-12. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
-13. `run-report --book <书籍ID> --json` 检查批次运行记录；如有失败，先用 `retry-failed --book <书籍ID> --json` 重试。
-14. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
-15. `quality-report --book <书籍ID> --json` 检查未译、源语言残留、术语不一致和占位符缺失。
-16. 如需人工处理，使用 `export-pending-translations`、`export-quality-fix`、`import-manual-translations` 和 `reset-translations` 闭环修复。
-17. `export` 导出 TXT 或 EPUB。
+4. `analyze-book --book <书籍ID> --json` 生成译前项目画像，检查对话比例、重复文本、术语密度和 EPUB 风险。
+5. `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
+6. 人工或 Agent 填写 `<工作区>/terminology/glossary.json` 里的 `target`，删除不需要的候选，统一人名、地名、组织名、能力名等译名。
+7. `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
+8. `terminology-status --book <书籍ID> --json` 确认没有冲突；空译名会作为 warning。
+9. `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 导出完整 Agent 工作区。
+10. `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json` 验收工作区。
+11. `audit-coverage --book <书籍ID> --json` 查看覆盖范围和可导出格式。
+12. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再用 `context-status` 确认章节上下文齐全。
+13. `translation-plan --book <书籍ID> --json` 生成 Agent 执行计划。
+14. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻，必要时设置 `--workers`、`--rpm` 和 `--stop-on-warning`。
+15. `run-report --book <书籍ID> --json` 检查批次运行记录；如有失败，先用 `retry-failed --book <书籍ID> --json` 重试。
+16. `review-translations --book <书籍ID> --mode risk --json` 审校风险段落；确认修复后用 `apply-review-fixes` 导入。
+17. `quality-report --book <书籍ID> --json` 检查未译、源语言残留、术语、占位符、风格和审校风险。
+18. `package-delivery --book <书籍ID> --output-dir <交付目录> --json` 生成译本、报告、术语和元数据交付包。
 
 ## 术语表流程
 
@@ -184,6 +194,41 @@ workspace/
 ```
 
 人工修复文件使用 JSON，不依赖 CSV/XLSX。`export-pending-translations` 导出未译段落，`export-quality-fix` 导出质量报告命中的段落；填写 `translated` 后用 `import-manual-translations` 导入。坏译文可用 `reset-translations --input reset.json` 精确清空，或明确传 `--all` 全量清空。
+
+## 审校、快照和交付
+
+成熟流水线会在翻译前后生成更多可追踪文件：
+
+```text
+data/books/<书籍ID>/
+  analysis.json
+  reviews/<审校ID>.json
+  snapshots/<快照ID>/manifest.json
+```
+
+`run-pipeline` 会自动创建开始前快照，执行分析、计划、上下文检查、翻译、失败重试、质量检查和风险审校。默认不导出最终文件；需要一并导出时传 `--export txt|epub --output <文件>`。
+
+审校默认只处理风险段落：
+
+```bash
+python3 main.py --agent-mode review-translations --book <书籍ID> --mode risk --json
+python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id <审校ID> --output ./review.md --json
+```
+
+审校不会直接覆盖译文。只有在审校 JSON 中填写 `approved_translation` 后，`apply-review-fixes` 才会写入，并且会拒绝未知段落、空译文和占位符缺失。
+
+交付前硬门槛：
+
+- `validate-export` 不能是 `error`。
+- `run-report.summary.failed` 必须为 0。
+- `quality-report.summary.placeholder_mismatch` 必须为 0。
+- EPUB 有标记风险时，交付包必须包含 `epub-risk-report.md`。
+
+交付包命令：
+
+```bash
+python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json
+```
 
 ## 占位符保护
 

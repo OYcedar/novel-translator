@@ -46,6 +46,10 @@ def run_report(root_books_dir: Path, book_id: str) -> dict:
     batches = [batch for run in runs for batch in run.get("batches", [])]
     failed = [batch for batch in batches if batch.get("status") == "failed"]
     succeeded = [batch for batch in batches if batch.get("status") == "succeeded"]
+    input_chars = sum(int(batch.get("input_chars", 0) or 0) for batch in batches)
+    output_chars = sum(int(batch.get("output_chars", 0) or 0) for batch in batches)
+    memory_hits = sum(int(batch.get("memory_hits", 0) or 0) for batch in batches)
+    rate_limited = sum(1 for batch in batches if batch.get("rate_limited"))
     return {
         "status": "ok" if not failed else "warning",
         "warnings": [f"存在 {len(failed)} 个失败批次"] if failed else [],
@@ -55,6 +59,12 @@ def run_report(root_books_dir: Path, book_id: str) -> dict:
             "batches": len(batches),
             "succeeded": len(succeeded),
             "failed": len(failed),
+            "input_chars": input_chars,
+            "output_chars": output_chars,
+            "memory_hits": memory_hits,
+            "rate_limited": rate_limited,
+            "estimated_tokens": sum(int(batch.get("estimated_tokens", 0) or 0) for batch in batches),
+            "cost_estimate": round(sum(float(batch.get("cost_estimate", 0) or 0) for batch in batches), 6),
         },
         "details": {"runs": [{"run_id": run.get("run_id"), "batches": len(run.get("batches", []))} for run in runs[-20:]]},
     }
@@ -87,6 +97,31 @@ def latest_failed_paragraph_ids(root_books_dir: Path, book_id: str) -> list[str]
     return ids
 
 
+def export_run_report(root_books_dir: Path, book_id: str, output: Path) -> dict:
+    report = run_report(root_books_dir, book_id)
+    failed = failed_batches(root_books_dir, book_id)
+    lines = [
+        f"# Run Report: {book_id}",
+        "",
+        f"- Runs: {report['summary'].get('runs', 0)}",
+        f"- Batches: {report['summary'].get('batches', 0)}",
+        f"- Succeeded: {report['summary'].get('succeeded', 0)}",
+        f"- Failed: {report['summary'].get('failed', 0)}",
+        f"- Input chars: {report['summary'].get('input_chars', 0)}",
+        f"- Output chars: {report['summary'].get('output_chars', 0)}",
+        f"- Memory hits: {report['summary'].get('memory_hits', 0)}",
+        "",
+    ]
+    if failed["details"]["batches"]:
+        lines.append("## Failed Batches")
+        lines.append("")
+        for batch in failed["details"]["batches"]:
+            lines.append(f"- `{batch.get('batch_id')}`: {batch.get('error', '')}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(lines), encoding="utf-8")
+    return {"status": "ok", "warnings": [], "summary": {"book": book_id, "output": str(output)}, "details": report}
+
+
 def _load_all_runs(root_books_dir: Path, book_id: str) -> list[dict]:
     directory = runs_dir(root_books_dir, book_id)
     if not directory.exists():
@@ -102,4 +137,3 @@ def _load_all_runs(root_books_dir: Path, book_id: str) -> list[dict]:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
