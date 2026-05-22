@@ -45,7 +45,7 @@ def export_epub_risk_report(book: Book, output: Path) -> dict:
     return {"status": "ok", "warnings": [], "summary": {"book": book.id, "output": str(output), "risks": len(items)}, "details": {"items": items}}
 
 
-def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], quality_config, epub_config, output_dir: Path) -> dict:
+def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], quality_config, epub_config, output_dir: Path, *, bilingual: bool = False, export_format: str | None = None) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     translated_dir = output_dir / "translated"
     reports_dir = output_dir / "reports"
@@ -54,14 +54,19 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     for directory in (translated_dir, reports_dir, terminology_dir, metadata_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    if book.source_type == "epub":
+    selected_format = export_format or book.source_type
+    if selected_format == "epub":
+        if book.source_type != "epub":
+            raise ValueError("TXT 书籍不能导出 EPUB")
         translated_path = translated_dir / f"{book.id}.epub"
-        export_result = export_epub(book, translated_path, epub_config)
+        export_result = export_epub(book, translated_path, epub_config, bilingual=bilingual)
         warnings = list(export_result.get("warnings", []))
-    else:
+    elif selected_format == "txt":
         translated_path = translated_dir / f"{book.id}.txt"
-        export_txt(book, translated_path)
+        export_txt(book, translated_path, bilingual=bilingual)
         warnings = []
+    else:
+        raise ValueError(f"不支持导出格式：{selected_format}")
 
     quality = quality_report(book, quality_config, terms)
     quality_path = reports_dir / "quality-report.json"
@@ -86,6 +91,8 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
         "epub_risk_report": epub_risk_path,
         "terms": str(terms_path),
         "memory_summary": str(memory_path),
+        "bilingual": bilingual,
+        "format": selected_format,
         "warnings": warnings,
     }
     manifest_path = output_dir / "delivery-manifest.json"
@@ -93,6 +100,6 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     return {
         "status": "warning" if warnings or quality["status"] != "ok" else "ok",
         "warnings": warnings,
-        "summary": {"book": book.id, "output_dir": str(output_dir), "translated": str(translated_path), "manifest": str(manifest_path)},
+        "summary": {"book": book.id, "output_dir": str(output_dir), "translated": str(translated_path), "manifest": str(manifest_path), "bilingual": bilingual},
         "details": manifest,
     }

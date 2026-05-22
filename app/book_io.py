@@ -477,7 +477,7 @@ def export_txt(book: Book, output: Path, bilingual: bool = False) -> None:
     output.write_text("\n".join(chunks).rstrip() + "\n", encoding="utf-8")
 
 
-def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None) -> dict:
+def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None, *, bilingual: bool = False) -> dict:
     config = epub_config or EpubConfig()
     if book.source_type != "epub":
         raise ValueError("当前书籍不是 EPUB，无法导出 EPUB")
@@ -493,7 +493,7 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None)
             data = src.read(info.filename)
             chapter = by_chapter.get(info.filename)
             if chapter is not None:
-                data, chapter_warnings = _replace_chapter_by_locator(data, chapter, config)
+                data, chapter_warnings = _replace_chapter_by_locator(data, chapter, config, bilingual=bilingual)
                 warnings.extend(f"{info.filename}: {message}" for message in chapter_warnings)
             elif title_translations and ((config.translate_nav and info.filename == nav_path) or (config.translate_toc and info.filename == toc_path)):
                 data, nav_warnings = _replace_navigation_text(data, title_translations)
@@ -502,12 +502,12 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None)
     return {"warnings": warnings, "warning_count": len(warnings)}
 
 
-def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfig) -> tuple[bytes, list[str]]:
+def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfig, *, bilingual: bool = False) -> tuple[bytes, list[str]]:
     warnings: list[str] = []
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
-        soup_result = _replace_chapter_by_locator_with_soup(data, chapter, config)
+        soup_result = _replace_chapter_by_locator_with_soup(data, chapter, config, bilingual=bilingual)
         if soup_result is not None:
             return soup_result
         return data, ["章节 XML 无法解析，且增强解析器不可用，已保留原文"]
@@ -526,11 +526,11 @@ def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfi
         if expected_hash and _text_hash(source_text) != expected_hash:
             warnings.append(f"{paragraph.id} 节点原文 hash 不一致，已保留原文")
             continue
-        _set_element_text(element, paragraph.translated, config=config)
+        _set_element_text(element, _export_text(paragraph.source, paragraph.translated, bilingual=bilingual), config=config)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True), warnings
 
 
-def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter, config: EpubConfig) -> tuple[bytes, list[str]] | None:
+def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter, config: EpubConfig, *, bilingual: bool = False) -> tuple[bytes, list[str]] | None:
     soup = _soup(data)
     if soup is None:
         return None
@@ -550,14 +550,21 @@ def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter, config:
         if expected_hash and _text_hash(source_text) != expected_hash:
             warnings.append(f"{paragraph.id} 节点原文 hash 不一致，已保留原文")
             continue
+        text = _export_text(paragraph.source, paragraph.translated, bilingual=bilingual)
         if getattr(config, "preserve_inline_tags", False) and _soup_node_inline_safe(node, set(config.inline_safe_tags)):
             for child in node.find_all(True):
                 child.string = ""
-            node.insert(0, paragraph.translated)
+            node.insert(0, text)
         else:
             node.clear()
-            node.string = paragraph.translated
+            node.string = text
     return str(soup).encode("utf-8"), warnings
+
+
+def _export_text(source: str, translated: str, *, bilingual: bool) -> str:
+    if not bilingual:
+        return translated
+    return f"{source}\n\n{translated}"
 
 
 def _set_element_text(element: ET.Element, text: str, *, config: EpubConfig) -> None:

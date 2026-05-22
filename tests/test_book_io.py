@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import argparse
 import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book
-from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig
+from app.cli_main import run_folder
+from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
 from app.feedback import verify_feedback_text
@@ -45,6 +47,19 @@ def test_export_txt_uses_translation_when_available(tmp_path: Path) -> None:
     text = output.read_text(encoding="utf-8")
     assert "你好。" in text
     assert "World." in text
+
+
+def test_export_txt_bilingual_writes_source_then_translation(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("Hello.\n\nWorld.", encoding="utf-8")
+    book = load_txt_book(source)
+    book.paragraphs[0].translated = "你好。"
+
+    output = tmp_path / "out.txt"
+    export_txt(book, output, bilingual=True)
+
+    text = output.read_text(encoding="utf-8")
+    assert "Hello.\n你好。" in text
 
 
 def test_load_epub_book_reads_spine_xhtml(tmp_path: Path) -> None:
@@ -139,6 +154,25 @@ def test_epub_export_preserves_outer_attributes(tmp_path: Path) -> None:
     assert 'id="p1"' in xhtml
     assert 'class="lead"' in xhtml
     assert "你好。" in xhtml
+
+
+def test_epub_export_bilingual_uses_node_locator(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub(epub, chapter_body="<body><p>Repeat.</p><p>Repeat.</p></body>")
+    book = load_epub_book(epub)
+    book.paragraphs[0].translated = "第一处。"
+    book.paragraphs[1].translated = "第二处。"
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    export_epub(book, output, bilingual=True)
+    with zipfile.ZipFile(output) as archive:
+        xhtml = archive.read("OEBPS/chapter1.xhtml").decode("utf-8")
+
+    assert "Repeat." in xhtml
+    assert "第一处。" in xhtml
+    assert "第二处。" in xhtml
+    assert xhtml.index("第一处。") < xhtml.index("第二处。")
 
 
 def test_extract_term_candidates_counts_repeated_names(tmp_path: Path) -> None:
@@ -400,6 +434,33 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert package["summary"]["output_dir"].endswith("delivery")
 
 
+def test_run_folder_dry_run_scans_without_registering(tmp_path: Path) -> None:
+    input_dir = tmp_path / "原文"
+    output_dir = tmp_path / "已翻译"
+    input_dir.mkdir()
+    source = input_dir / "book.txt"
+    source.write_text("Hello.\n\nWorld.", encoding="utf-8")
+    config = _app_config(tmp_path)
+
+    report = run_folder(
+        config,
+        argparse.Namespace(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            format="txt",
+            dry_run=True,
+            max_batches=None,
+            bilingual=True,
+            monolingual=False,
+        ),
+    )
+
+    assert report["status"] == "ok"
+    assert report["summary"]["files"] == 1
+    assert report["summary"]["bilingual"] is True
+    assert not (tmp_path / "data").exists()
+
+
 def report_context(books_dir: Path, book_id: str) -> dict:
     from app.context import load_context
 
@@ -420,6 +481,7 @@ def _app_config(tmp_path: Path) -> AppConfig:
         context=ContextConfig(),
         review=ReviewConfig(),
         automation=AutomationConfig(),
+        export=ExportConfig(),
         quality=QualityConfig(source_residual_patterns=()),
         epub=EpubConfig(),
     )

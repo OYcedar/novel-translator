@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -102,6 +103,23 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--rpm", type=int)
     translate.add_argument("--tpm", type=int)
     translate.add_argument("--stop-on-warning", action="store_true")
+
+    run_folder = add_common(subparsers.add_parser("run-folder", help="批量处理原文文件夹中的 EPUB/TXT 小说"), json_flag=True)
+    run_folder.add_argument("--input-dir", type=Path)
+    run_folder.add_argument("--output-dir", type=Path)
+    run_folder.add_argument("--format", choices=["txt", "epub"])
+    run_folder.add_argument("--dry-run", action="store_true")
+    run_folder.add_argument("--max-batches", type=int)
+    add_export_mode_flags(run_folder)
+
+    repair = add_common(subparsers.add_parser("repair-translations", help="重译质量报告标记的风险段落"), json_flag=True)
+    repair.add_argument("--book", required=True)
+    repair.add_argument("--dry-run", action="store_true")
+    repair.add_argument("--run-id")
+    repair.add_argument("--max-batches", type=int)
+
+    refresh = add_common(subparsers.add_parser("context-refresh", help="重建章节上下文摘要"), json_flag=True)
+    refresh.add_argument("--book", required=True)
 
     status = add_common(subparsers.add_parser("translation-status", help="查看翻译进度"), json_flag=True)
     status.add_argument("--book", required=True)
@@ -228,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--export", choices=["txt", "epub"])
     pipeline.add_argument("--output", type=Path)
     pipeline.add_argument("--dry-run", action="store_true")
+    add_export_mode_flags(pipeline)
 
     run_report_export = add_common(subparsers.add_parser("export-run-report", help="导出 Markdown 运行报告"), json_flag=True)
     run_report_export.add_argument("--book", required=True)
@@ -251,12 +270,13 @@ def build_parser() -> argparse.ArgumentParser:
     delivery = add_common(subparsers.add_parser("package-delivery", help="生成交付包"), json_flag=True)
     delivery.add_argument("--book", required=True)
     delivery.add_argument("--output-dir", type=Path, required=True)
+    add_export_mode_flags(delivery)
 
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
     export.add_argument("--book", required=True)
     export.add_argument("--format", choices=["txt", "epub"], required=True)
     export.add_argument("--output", type=Path, required=True)
-    export.add_argument("--bilingual", action="store_true")
+    add_export_mode_flags(export)
 
     validate_export_parser = add_common(subparsers.add_parser("validate-export", help="导出前检查"), json_flag=True)
     validate_export_parser.add_argument("--book", required=True)
@@ -268,6 +288,20 @@ def add_common(parser: argparse.ArgumentParser, *, json_flag: bool) -> argparse.
     if json_flag:
         parser.add_argument("--json", action="store_true", dest="json_output")
     return parser
+
+
+def add_export_mode_flags(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--bilingual", action="store_true", help="导出原文和译文对照")
+    group.add_argument("--monolingual", action="store_true", help="只导出译文")
+
+
+def resolve_bilingual(config: AppConfig, args: argparse.Namespace) -> bool:
+    if getattr(args, "bilingual", False):
+        return True
+    if getattr(args, "monolingual", False):
+        return False
+    return config.export.bilingual
 
 
 def dispatch(args: argparse.Namespace) -> dict:
@@ -291,6 +325,13 @@ def dispatch(args: argparse.Namespace) -> dict:
         return translation_status(config, args.book)
     if args.command == "translate":
         return translate(config, args)
+    if args.command == "run-folder":
+        return run_folder(config, args)
+    if args.command == "repair-translations":
+        return repair_translations(config, args)
+    if args.command == "context-refresh":
+        book = load_book(config.books_dir, args.book)
+        return summarize_context(config.books_dir, book, config.context, config.llm)
     if args.command == "quality-report":
         book = load_book(config.books_dir, args.book)
         return quality_report(book, config.quality, load_terms(config.books_dir, book.id))
@@ -383,7 +424,7 @@ def dispatch(args: argparse.Namespace) -> dict:
         return restore_snapshot(config.books_dir, args.book, args.snapshot)
     if args.command == "package-delivery":
         book = load_book(config.books_dir, args.book)
-        return package_delivery(config.books_dir, book, load_terms(config.books_dir, book.id), config.quality, config.epub, args.output_dir.expanduser().resolve())
+        return package_delivery(config.books_dir, book, load_terms(config.books_dir, book.id), config.quality, config.epub, args.output_dir.expanduser().resolve(), bilingual=resolve_bilingual(config, args))
     if args.command == "export":
         return export_book(config, args)
     if args.command == "validate-export":
@@ -525,24 +566,104 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     batch_succeeded = 0
     batch_failed = 0
     batch_warnings = []
+    if workers > 1 and len(batches) > 1 and not getattr(args, "dry_run", False) and not stop_on_warning:
+        completed = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {}
+            for index, batch in enumerate(batches, start=1):
+                if index > 1:
+                    time.sleep(_rate_limit_delay(batch, rpm, tpm))
+                batch_id = f"{run_id}-b{index:04d}"
+                started = time.time()
+                future = executor.submit(_translate_one_batch, config, batch, terms, book, context, False)
+                futures[future] = (index, batch_id, batch, started)
+            for future in as_completed(futures):
+                index, batch_id, batch, started = futures[future]
+                try:
+                    result, warnings = future.result()
+                    completed.append((index, batch_id, batch, started, result, warnings, ""))
+                except Exception as exc:
+                    completed.append((index, batch_id, batch, started, {}, [], str(exc)))
+        for _index, batch_id, batch, started, result, warnings, error in sorted(completed, key=lambda item: item[0]):
+            if error:
+                batch_failed += 1
+                record_batch(
+                    config.books_dir,
+                    book.id,
+                    run_id,
+                    _batch_record(
+                        batch_id,
+                        batch,
+                        status="failed",
+                        started=started,
+                        error=error,
+                        warnings=warnings,
+                        model=config.llm.model,
+                        retry_count=0,
+                        result=result,
+                        memory_hits=0,
+                        rate_limited=False,
+                    ),
+                )
+                continue
+            for paragraph in batch:
+                translated = result.get(paragraph.id, "").strip()
+                if translated:
+                    paragraph.translated = translated
+                    saved_translations += 1
+                    remember_translation(memory_entries, source=paragraph.source, translated=translated, term_hash=term_hash, model=config.llm.model)
+            batch_succeeded += 1
+            batch_warnings.extend(warnings)
+            record_batch(
+                config.books_dir,
+                book.id,
+                run_id,
+                _batch_record(
+                    batch_id,
+                    batch,
+                    status="succeeded",
+                    started=started,
+                    error="",
+                    warnings=warnings,
+                    model=config.llm.model,
+                    retry_count=0,
+                    result=result,
+                    memory_hits=0,
+                    rate_limited=False,
+                ),
+            )
+        persist_book(config.books_dir, book)
+        save_memory(config.books_dir, book.id, memory_entries)
+        return {
+            "status": "ok" if not batch_failed else "warning",
+            "warnings": batch_warnings,
+            "summary": {
+                "book": book.id,
+                "run_id": run_id,
+                "batches": len(batches),
+                "batch_succeeded": batch_succeeded,
+                "batch_failed": batch_failed,
+                "reused_memory": reused_memory,
+                "saved_translations": saved_translations,
+                "translated": saved_translations,
+                "pending": len(pending_paragraphs(book.paragraphs)),
+                "targeted": len(target_ids),
+                "workers": workers,
+                "rpm": rpm,
+                "tpm": tpm,
+            },
+            "details": {},
+        }
     for index, batch in enumerate(batches, start=1):
-        if index > 1 and rpm > 0 and not getattr(args, "dry_run", False):
-            time.sleep(max(0, 60 / rpm))
+        if index > 1 and not getattr(args, "dry_run", False):
+            time.sleep(_rate_limit_delay(batch, rpm, tpm))
         batch_id = f"{run_id}-b{index:04d}"
         started = time.time()
         result: dict[str, str] = {}
         warnings: list[str] = []
         error = ""
         try:
-            if getattr(args, "dry_run", False):
-                result = {paragraph.id: paragraph.source for paragraph in batch}
-            else:
-                result = translate_batch(config, batch, terms, book=book, context=context)
-            validation = validate_llm_response(batch, result)
-            warnings = validation["warnings"]
-            warnings.extend(_translation_quality_warnings(batch, result, terms))
-            if validation["errors"]:
-                raise ValueError("; ".join(validation["errors"]))
+            result, warnings = _translate_one_batch(config, batch, terms, book, context, getattr(args, "dry_run", False))
         except Exception as exc:
             error = str(exc)
             batch_failed += 1
@@ -619,6 +740,161 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     }
 
 
+def run_folder(config: AppConfig, args: argparse.Namespace) -> dict:
+    input_dir = _configured_dir(config.root, args.input_dir, config.automation.folder_input_dir)
+    output_dir = _configured_dir(config.root, args.output_dir, config.automation.folder_output_dir)
+    files = sorted(
+        path
+        for path in input_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".epub", ".txt"}
+    )
+    items = []
+    warnings = []
+    errors = []
+    bilingual = resolve_bilingual(config, args)
+    for source_path in files:
+        item = {
+            "source": str(source_path),
+            "format": args.format or source_path.suffix.lower().lstrip("."),
+            "dry_run": bool(args.dry_run),
+            "steps": [],
+        }
+        try:
+            if source_path.suffix.lower() == ".epub":
+                inspection = inspect_epub(source_path, config.epub)
+                item["steps"].append({"step": "inspect-epub", "status": inspection["status"], "summary": inspection["summary"]})
+                if inspection.get("warnings"):
+                    warnings.extend(f"{source_path.name}: {warning}" for warning in inspection["warnings"])
+            if args.dry_run:
+                book = load_source_book(source_path, epub_config=config.epub)
+                item["summary"] = {
+                    "title": book.title,
+                    "type": book.source_type,
+                    "chapters": len(book.chapters),
+                    "paragraphs": len(book.paragraphs),
+                    "would_register": True,
+                    "would_translate": True,
+                    "would_export": True,
+                    "bilingual": bilingual,
+                }
+                items.append(item)
+                continue
+            book = load_source_book(source_path, epub_config=config.epub)
+            save_book(config.books_dir, book, source_path)
+            terms = load_terms(config.books_dir, book.id)
+            item["book"] = book.id
+            item["steps"].append({"step": "add-book", "status": "ok", "summary": {"book": book.id, "chapters": len(book.chapters), "paragraphs": len(book.paragraphs)}})
+            analysis = analyze_book_report(config.books_dir, book, terms)
+            item["steps"].append({"step": "analyze-book", "status": analysis["status"], "summary": analysis["summary"]})
+            plan = translation_plan_report(config.books_dir, book, terms, config.quality)
+            item["steps"].append({"step": "translation-plan", "status": plan["status"], "summary": plan["summary"]})
+            context = context_status(config.books_dir, book)
+            if context["status"] != "ok":
+                context = summarize_context(config.books_dir, book, config.context, config.llm)
+            item["steps"].append({"step": "context", "status": context["status"], "summary": context["summary"]})
+            translate_args = argparse.Namespace(
+                book=book.id,
+                max_batches=args.max_batches,
+                dry_run=False,
+                no_memory=False,
+                run_id=new_run_id(),
+                workers=config.automation.workers,
+                rpm=config.automation.rpm,
+                tpm=config.automation.tpm,
+                stop_on_warning=config.automation.stop_on_warning,
+            )
+            translated = translate(config, translate_args)
+            item["steps"].append({"step": "translate", "status": translated["status"], "summary": translated["summary"]})
+            if config.automation.auto_retry_failed:
+                retry = retry_failed(config, argparse.Namespace(book=book.id, run_id=new_run_id(), dry_run=False))
+                item["steps"].append({"step": "retry-failed", "status": retry["status"], "summary": retry["summary"]})
+            book = load_book(config.books_dir, book.id)
+            quality = quality_report(book, config.quality, terms)
+            item["steps"].append({"step": "quality-report", "status": quality["status"], "summary": quality["summary"]})
+            export_format = args.format or book.source_type
+            validation = validate_export(config, argparse.Namespace(book=book.id, format=export_format))
+            item["steps"].append({"step": "validate-export", "status": validation["status"], "summary": validation["summary"]})
+            if validation["status"] != "error":
+                delivery_dir = output_dir / book.id
+                delivery = package_delivery(config.books_dir, book, terms, config.quality, config.epub, delivery_dir, bilingual=bilingual, export_format=export_format)
+                item["steps"].append({"step": "package-delivery", "status": delivery["status"], "summary": delivery["summary"]})
+            items.append(item)
+        except Exception as error:
+            errors.append({"source": str(source_path), "code": type(error).__name__, "message": str(error)})
+            item["error"] = str(error)
+            items.append(item)
+    status = "error" if errors else ("warning" if warnings or any(any(step.get("status") == "warning" for step in item.get("steps", [])) for item in items) else "ok")
+    return {
+        "status": status,
+        "errors": errors,
+        "warnings": warnings,
+        "summary": {
+            "input_dir": str(input_dir),
+            "output_dir": str(output_dir),
+            "files": len(files),
+            "dry_run": bool(args.dry_run),
+            "bilingual": bilingual,
+        },
+        "details": {"items": items},
+    }
+
+
+def repair_translations(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    terms = load_terms(config.books_dir, book.id)
+    quality = quality_report(book, config.quality, terms)
+    target_ids = _quality_target_ids(quality)
+    if args.max_batches is not None:
+        batches = make_batches([paragraph for paragraph in book.paragraphs if paragraph.id in target_ids], config.translation.batch_max_chars)
+        target_ids = {paragraph.id for batch in batches[: args.max_batches] for paragraph in batch}
+    if args.dry_run:
+        return {
+            "status": "ok",
+            "warnings": [],
+            "summary": {"book": book.id, "targets": len(target_ids), "dry_run": True},
+            "details": {"target_ids": sorted(target_ids), "quality": quality["summary"]},
+        }
+    for paragraph in book.paragraphs:
+        if paragraph.id in target_ids:
+            paragraph.translated = ""
+    persist_book(config.books_dir, book)
+    translate_args = argparse.Namespace(
+        book=book.id,
+        max_batches=None,
+        dry_run=False,
+        no_memory=True,
+        run_id=args.run_id or new_run_id(),
+        target_ids=sorted(target_ids),
+        workers=config.automation.workers,
+        rpm=config.automation.rpm,
+        tpm=config.automation.tpm,
+        stop_on_warning=config.automation.stop_on_warning,
+    )
+    report = translate(config, translate_args)
+    report["summary"]["repair_targets"] = len(target_ids)
+    report["details"] = {"target_ids": sorted(target_ids), "quality_before": quality["summary"]}
+    return report
+
+
+def _configured_dir(root: Path, explicit: Path | None, configured: str) -> Path:
+    path = explicit or Path(configured)
+    path = path.expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (root / path).resolve()
+
+
+def _quality_target_ids(quality: dict) -> set[str]:
+    ids: set[str] = set()
+    for key in ("source_residual", "terminology_mismatch", "placeholder_mismatch", "style_inconsistency", "dialogue_punctuation", "over_literal_translation", "review_required"):
+        for item in quality.get("details", {}).get(key, []):
+            if isinstance(item, str):
+                ids.add(item)
+            elif isinstance(item, dict) and item.get("id"):
+                ids.add(str(item["id"]))
+    return ids
+
+
 def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
     ids = latest_failed_paragraph_ids(config.books_dir, book.id)
@@ -692,7 +968,7 @@ def run_pipeline(config: AppConfig, args: argparse.Namespace) -> dict:
         steps.append({"step": "validate-export", "status": export_validation["status"], "summary": export_validation["summary"]})
         if export_validation["status"] != "error":
             output = args.output.expanduser().resolve() if args.output else config.root / f"{book.id}.{args.export}"
-            export_args = argparse.Namespace(book=book.id, format=args.export, output=output, bilingual=False)
+            export_args = argparse.Namespace(book=book.id, format=args.export, output=output, bilingual=resolve_bilingual(config, args), monolingual=False)
             exported = export_book(config, export_args)
             steps.append({"step": "export", "status": exported["status"], "summary": exported["summary"]})
     status = "error" if any(step["status"] == "error" for step in steps) else ("warning" if warnings or any(step["status"] == "warning" for step in steps) else "ok")
@@ -727,6 +1003,30 @@ def _batch_record(batch_id, batch, *, status: str, started: float, error: str, w
     }
 
 
+def _rate_limit_delay(batch, rpm: int, tpm: int) -> float:
+    rpm_delay = 60 / rpm if rpm > 0 else 0
+    if tpm <= 0:
+        return max(0, rpm_delay)
+    estimated_tokens = max(1, round(sum(len(paragraph.source) for paragraph in batch) / 2))
+    tpm_delay = estimated_tokens * 60 / tpm
+    return max(0, rpm_delay, tpm_delay)
+
+
+def _translate_one_batch(config: AppConfig, batch, terms, book: Book, context: dict, dry_run: bool) -> tuple[dict[str, str], list[str]]:
+    if dry_run:
+        result = {paragraph.id: paragraph.source for paragraph in batch}
+    else:
+        result = translate_batch(config, batch, terms, book=book, context=context)
+    validation = validate_llm_response(batch, result)
+    warnings = validation["warnings"]
+    warnings.extend(_translation_quality_warnings(batch, result, terms))
+    errors = list(validation["errors"])
+    errors.extend(_translation_quality_errors(config, batch, result))
+    if errors:
+        raise ValueError("; ".join(errors))
+    return result, warnings
+
+
 def _translation_quality_warnings(batch, result: dict[str, str], terms) -> list[str]:
     warnings = []
     for paragraph in batch:
@@ -748,6 +1048,31 @@ def _translation_quality_warnings(batch, result: dict[str, str], terms) -> list[
         if missing_terms:
             warnings.append(f"段落 {paragraph.id} 缺少术语译名：{', '.join(missing_terms)}")
     return warnings
+
+
+def _translation_quality_errors(config: AppConfig, batch, result: dict[str, str]) -> list[str]:
+    errors = []
+    if config.translation.fail_on_empty_translation:
+        empty_ids = [
+            paragraph.id
+            for paragraph in batch
+            if paragraph.id in result and not result.get(paragraph.id, "").strip()
+        ]
+        if empty_ids:
+            errors.append(f"模型响应包含空译文：{', '.join(empty_ids)}")
+    if config.translation.fail_on_placeholder_mismatch:
+        for paragraph in batch:
+            translated = result.get(paragraph.id, "")
+            if not translated.strip():
+                continue
+            missing = [
+                placeholder.value
+                for placeholder in extract_placeholders(paragraph.source)
+                if placeholder.value not in translated
+            ]
+            if missing:
+                errors.append(f"段落 {paragraph.id} 缺少占位符：{', '.join(missing)}")
+    return errors
 
 
 def export_terminology(config: AppConfig, args: argparse.Namespace) -> dict:
@@ -824,18 +1149,19 @@ def terminology_status(config: AppConfig, book_id: str) -> dict:
 def export_book(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
     output = args.output.expanduser().resolve()
+    bilingual = resolve_bilingual(config, args)
     if args.format == "txt":
-        export_txt(book, output, bilingual=args.bilingual)
+        export_txt(book, output, bilingual=bilingual)
         warnings = []
     elif args.format == "epub":
-        result = export_epub(book, output, config.epub)
+        result = export_epub(book, output, config.epub, bilingual=bilingual)
         warnings = result["warnings"]
     else:
         raise ValueError(f"不支持导出格式：{args.format}")
     return {
         "status": "ok" if not warnings else "warning",
         "warnings": warnings,
-        "summary": {"book": book.id, "output": str(output), "format": args.format, "warning_count": len(warnings)},
+        "summary": {"book": book.id, "output": str(output), "format": args.format, "bilingual": bilingual, "warning_count": len(warnings)},
         "details": {},
     }
 

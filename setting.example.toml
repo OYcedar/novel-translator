@@ -11,6 +11,9 @@ system_prompt_file = "prompts/novel_translation_system.md"
 batch_max_chars = 4000
 retry_count = 3
 retry_delay = 2
+quality_passes = 2
+fail_on_placeholder_mismatch = true
+fail_on_empty_translation = true
 
 [context]
 previous_paragraphs = 3
@@ -29,6 +32,11 @@ rpm = 30
 tpm = 0
 stop_on_warning = false
 auto_retry_failed = true
+folder_input_dir = "../原文"
+folder_output_dir = "../已翻译"
+
+[export]
+bilingual = false
 
 [quality]
 source_residual_patterns = [

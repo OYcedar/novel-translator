@@ -26,6 +26,9 @@ class TranslationConfig:
     batch_max_chars: int = 4000
     retry_count: int = 3
     retry_delay: int = 2
+    quality_passes: int = 2
+    fail_on_placeholder_mismatch: bool = True
+    fail_on_empty_translation: bool = True
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,13 @@ class AutomationConfig:
     tpm: int = 0
     stop_on_warning: bool = False
     auto_retry_failed: bool = True
+    folder_input_dir: str = "../原文"
+    folder_output_dir: str = "../已翻译"
+
+
+@dataclass(frozen=True)
+class ExportConfig:
+    bilingual: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,6 +88,7 @@ class AppConfig:
     context: ContextConfig
     review: ReviewConfig
     automation: AutomationConfig
+    export: ExportConfig
     quality: QualityConfig
     epub: EpubConfig
 
@@ -108,6 +119,7 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     context_raw = raw.get("context", {})
     review_raw = raw.get("review", {})
     automation_raw = raw.get("automation", {})
+    export_raw = raw.get("export", {})
     quality_raw = raw.get("quality", {})
     epub_raw = raw.get("epub", {})
     llm = LlmConfig(
@@ -125,6 +137,9 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         batch_max_chars=int(translation_raw.get("batch_max_chars", 4000)),
         retry_count=int(translation_raw.get("retry_count", 3)),
         retry_delay=int(translation_raw.get("retry_delay", 2)),
+        quality_passes=int(translation_raw.get("quality_passes", 2)),
+        fail_on_placeholder_mismatch=bool(translation_raw.get("fail_on_placeholder_mismatch", True)),
+        fail_on_empty_translation=bool(translation_raw.get("fail_on_empty_translation", True)),
     )
     quality = QualityConfig(
         source_residual_patterns=tuple(str(item) for item in quality_raw.get("source_residual_patterns", []))
@@ -146,6 +161,11 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         tpm=int(automation_raw.get("tpm", 0)),
         stop_on_warning=bool(automation_raw.get("stop_on_warning", False)),
         auto_retry_failed=bool(automation_raw.get("auto_retry_failed", True)),
+        folder_input_dir=str(automation_raw.get("folder_input_dir", "../原文")),
+        folder_output_dir=str(automation_raw.get("folder_output_dir", "../已翻译")),
+    )
+    export = ExportConfig(
+        bilingual=bool(export_raw.get("bilingual", False)),
     )
     epub = EpubConfig(
         parser=str(epub_raw.get("parser", "auto")),
@@ -158,7 +178,7 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         preserve_inline_tags=bool(epub_raw.get("preserve_inline_tags", True)),
         inline_safe_tags=tuple(str(item) for item in epub_raw.get("inline_safe_tags", ["span", "strong", "em", "a"])),
     )
-    return AppConfig(root=root, llm=llm, translation=translation, context=context, review=review, automation=automation, quality=quality, epub=epub)
+    return AppConfig(root=root, llm=llm, translation=translation, context=context, review=review, automation=automation, export=export, quality=quality, epub=epub)
 
 
 def load_toml(path: Path) -> dict:
