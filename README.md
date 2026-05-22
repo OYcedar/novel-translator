@@ -36,9 +36,17 @@ python3 main.py --agent-mode text-scope --book <书籍ID> --json
 python3 main.py --agent-mode export-terminology --book <书籍ID> --output-dir ./workspace --json
 python3 main.py --agent-mode import-terminology --book <书籍ID> --input ./workspace/terminology/glossary.json --json
 python3 main.py --agent-mode terminology-status --book <书籍ID> --json
+python3 main.py --agent-mode prepare-agent-workspace --book <书籍ID> --output-dir ./workspace --json
+python3 main.py --agent-mode validate-agent-workspace --book <书籍ID> --workspace ./workspace --json
+python3 main.py --agent-mode audit-coverage --book <书籍ID> --json
 python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --json
 python3 main.py --agent-mode translation-status --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
+python3 main.py --agent-mode export-pending-translations --book <书籍ID> --output ./pending.json --json
+python3 main.py --agent-mode export-quality-fix --book <书籍ID> --output ./quality-fix.json --json
+python3 main.py --agent-mode import-manual-translations --book <书籍ID> --input ./manual.json --json
+python3 main.py --agent-mode reset-translations --book <书籍ID> --input ./reset.json --json
+python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input ./feedback.txt --json
 python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json
 python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json
 ```
@@ -66,10 +74,14 @@ skills/novel-translator/SKILL.md
 5. 人工或 Agent 填写 `<工作区>/terminology/glossary.json` 里的 `target`，删除不需要的候选，统一人名、地名、组织名、能力名等译名。
 6. `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
 7. `terminology-status --book <书籍ID> --json` 确认没有冲突；空译名会作为 warning。
-8. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
-9. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
-10. `quality-report --book <书籍ID> --json` 检查未译、源语言残留和术语不一致。
-11. `export` 导出 TXT 或 EPUB。
+8. `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 导出完整 Agent 工作区。
+9. `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json` 验收工作区。
+10. `audit-coverage --book <书籍ID> --json` 查看覆盖范围和可导出格式。
+11. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
+12. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
+13. `quality-report --book <书籍ID> --json` 检查未译、源语言残留、术语不一致和占位符缺失。
+14. 如需人工处理，使用 `export-pending-translations`、`export-quality-fix`、`import-manual-translations` 和 `reset-translations` 闭环修复。
+15. `export` 导出 TXT 或 EPUB。
 
 ## 术语表流程
 
@@ -108,6 +120,27 @@ workspace/
 ```
 
 翻译时，命中当前批次原文的术语会被注入模型请求的 `glossary` 字段。质量报告会检查：如果原文包含术语 `source`，译文必须包含对应 `target`。
+
+## Agent 工作区与人工修复
+
+完整工作区会导出：
+
+```text
+workspace/
+  manifest.json
+  book-summary.json
+  text-scope.json
+  terminology/
+    glossary.json
+    contexts/term-contexts.json
+  quality/latest-report.json
+```
+
+人工修复文件使用 JSON，不依赖 CSV/XLSX。`export-pending-translations` 导出未译段落，`export-quality-fix` 导出质量报告命中的段落；填写 `translated` 后用 `import-manual-translations` 导入。坏译文可用 `reset-translations --input reset.json` 精确清空，或明确传 `--all` 全量清空。
+
+## 占位符保护
+
+翻译请求会把段落里的 `{name}`、`{{name}}`、`%s`、`%d`、HTML 标签和 `[#note]` 这类脚注锚点作为 `placeholders` 传给模型。译文必须原样保留这些占位符；`quality-report` 会用 `placeholder_mismatch` 报告缺失项。
 
 ## 数据位置
 

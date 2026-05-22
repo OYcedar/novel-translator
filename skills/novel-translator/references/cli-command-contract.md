@@ -34,6 +34,14 @@ python3 main.py --agent-mode <命令> ...
 
 术语表输入必须是数组，或包含 `terms` 数组的对象。每项建议包含 `source`、`target`、`category`、`note`、`occurrences`、`sample_ids`。
 
+## Agent 工作区与覆盖审计
+
+| 命令 | 用途 | 成功判断 | 失败处理 |
+| --- | --- | --- | --- |
+| `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` | 导出 Agent 分析所需的工作区 | 工作区包含 manifest、book-summary、text-scope、terminology 和 quality 文件 | 删除不完整工作区后重跑 |
+| `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json` | 校验工作区结构和段落 ID | `status` 不是 `error` | 按 errors 修工作区或重新 prepare |
+| `audit-coverage --book <书籍ID> --json` | 审计段落翻译覆盖和可导出格式 | 最终交付前 pending 应为 0 | pending 不为 0 时继续翻译或人工修复 |
+
 ## 翻译与检查
 
 | 命令 | 用途 | 成功判断 | 失败处理 |
@@ -42,7 +50,18 @@ python3 main.py --agent-mode <命令> ...
 | `translate --book <书籍ID> --json` | 继续翻译所有未译段落 | pending 持续下降 | 停滞时检查模型配置、术语或手动处理 |
 | `translate --book <书籍ID> --dry-run --json` | 不调用模型，把原文写入译文字段验证流程 | 只用于测试流程 | 不得当真实译文交付 |
 | `translation-status --book <书籍ID> --json` | 查看总数、已译、待译和进度 | 数量可解释 | pending 不下降时排查翻译请求 |
-| `quality-report --book <书籍ID> --json` | 检查未译、源文残留和术语不一致 | 最终交付前应为 `ok` | 按 details 修译文或术语 |
+| `quality-report --book <书籍ID> --json` | 检查未译、源文残留、术语不一致和占位符缺失 | 最终交付前应为 `ok` | 按 details 修译文、术语或占位符 |
+
+## 人工修复与反馈
+
+| 命令 | 用途 | 成功判断 | 失败处理 |
+| --- | --- | --- | --- |
+| `export-pending-translations --book <书籍ID> --output <文件> --json` | 导出未译段落 | 输出 JSON 的 `items` 数量可解释 | pending 很多时优先继续模型翻译 |
+| `export-quality-fix --book <书籍ID> --output <文件> --json` | 导出质量问题段落 | 输出 JSON 包含 reasons 和 translated 字段 | 只填写 translated，不改 id/source |
+| `import-manual-translations --book <书籍ID> --input <文件> --json` | 导入人工译文 | `summary.imported` 可解释 | 未知段落 ID 会整体失败，修输入后重跑 |
+| `reset-translations --book <书籍ID> --input <文件> --json` | 精确清空坏译文 | `summary.reset` 可解释 | 输入 ID 不存在会整体失败 |
+| `reset-translations --book <书籍ID> --all --json` | 全量清空译文 | 用户明确要求完整重译时才用 | 不要和 `--input` 同时用 |
+| `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` | 按反馈文本反查原文/译文段落 | 命中分类可解释 | `not_found` 需让用户补上下文或截图文字 |
 
 ## 导出
 
@@ -51,4 +70,3 @@ python3 main.py --agent-mode <命令> ...
 | `export --book <书籍ID> --format txt --output <文件> --json` | 导出 TXT 译本 | 输出文件存在 | 路径不可写时换输出路径 |
 | `export --book <书籍ID> --format txt --output <文件> --bilingual --json` | 导出双语 TXT | 输出文件包含原文和译文 | 仅用于校对，不一定适合发布 |
 | `export --book <书籍ID> --format epub --output <文件> --json` | 导出 EPUB 译本 | 源书为 EPUB 且输出文件存在 | TXT 书不能导出 EPUB；复杂排版需人工复核 |
-

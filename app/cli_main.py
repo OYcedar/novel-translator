@@ -7,6 +7,14 @@ from pathlib import Path
 
 from app.book_io import export_epub, export_txt, load_source_book
 from app.config import AppConfig, load_config
+from app.feedback import verify_feedback_text
+from app.manual import (
+    audit_coverage_report,
+    export_pending_translations,
+    export_quality_fix,
+    import_manual_translations,
+    reset_translations,
+)
 from app.models import load_book, persist_book, save_book, slugify
 from app.quality import quality_report
 from app.terminology import (
@@ -17,6 +25,7 @@ from app.terminology import (
     validate_terms,
 )
 from app.translator import make_batches, pending_paragraphs, translate_batch
+from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,6 +100,53 @@ def build_parser() -> argparse.ArgumentParser:
     )
     terminology_status.add_argument("--book", required=True)
 
+    prepare_workspace = add_common(
+        subparsers.add_parser("prepare-agent-workspace", help="导出 Agent 分析工作区"),
+        json_flag=True,
+    )
+    prepare_workspace.add_argument("--book", required=True)
+    prepare_workspace.add_argument("--output-dir", type=Path, required=True)
+
+    validate_workspace = add_common(
+        subparsers.add_parser("validate-agent-workspace", help="校验 Agent 工作区"),
+        json_flag=True,
+    )
+    validate_workspace.add_argument("--book", required=True)
+    validate_workspace.add_argument("--workspace", type=Path, required=True)
+
+    audit = add_common(subparsers.add_parser("audit-coverage", help="审计翻译覆盖范围"), json_flag=True)
+    audit.add_argument("--book", required=True)
+
+    pending_export = add_common(
+        subparsers.add_parser("export-pending-translations", help="导出未译段落"),
+        json_flag=True,
+    )
+    pending_export.add_argument("--book", required=True)
+    pending_export.add_argument("--output", type=Path, required=True)
+
+    quality_fix = add_common(
+        subparsers.add_parser("export-quality-fix", help="导出质量修复表"),
+        json_flag=True,
+    )
+    quality_fix.add_argument("--book", required=True)
+    quality_fix.add_argument("--output", type=Path, required=True)
+
+    manual_import = add_common(
+        subparsers.add_parser("import-manual-translations", help="导入人工填写译文"),
+        json_flag=True,
+    )
+    manual_import.add_argument("--book", required=True)
+    manual_import.add_argument("--input", type=Path, required=True)
+
+    reset = add_common(subparsers.add_parser("reset-translations", help="精确重置坏译文"), json_flag=True)
+    reset.add_argument("--book", required=True)
+    reset.add_argument("--input", type=Path)
+    reset.add_argument("--all", action="store_true", dest="reset_all")
+
+    feedback = add_common(subparsers.add_parser("verify-feedback-text", help="按反馈文本反查段落"), json_flag=True)
+    feedback.add_argument("--book", required=True)
+    feedback.add_argument("--input", type=Path, required=True)
+
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
     export.add_argument("--book", required=True)
     export.add_argument("--format", choices=["txt", "epub"], required=True)
@@ -129,6 +185,41 @@ def dispatch(args: argparse.Namespace) -> dict:
         return import_terminology(config, args)
     if args.command == "terminology-status":
         return terminology_status(config, args.book)
+    if args.command == "prepare-agent-workspace":
+        book = load_book(config.books_dir, args.book)
+        return prepare_agent_workspace(
+            config.books_dir,
+            book,
+            load_terms(config.books_dir, book.id),
+            config.quality,
+            args.output_dir.expanduser().resolve(),
+        )
+    if args.command == "validate-agent-workspace":
+        book = load_book(config.books_dir, args.book)
+        return validate_agent_workspace(book, args.workspace.expanduser().resolve())
+    if args.command == "audit-coverage":
+        book = load_book(config.books_dir, args.book)
+        return audit_coverage_report(book, load_terms(config.books_dir, book.id))
+    if args.command == "export-pending-translations":
+        book = load_book(config.books_dir, args.book)
+        return export_pending_translations(book, load_terms(config.books_dir, book.id), args.output.expanduser().resolve())
+    if args.command == "export-quality-fix":
+        book = load_book(config.books_dir, args.book)
+        return export_quality_fix(book, load_terms(config.books_dir, book.id), config.quality, args.output.expanduser().resolve())
+    if args.command == "import-manual-translations":
+        book = load_book(config.books_dir, args.book)
+        return import_manual_translations(config.books_dir, book, args.input.expanduser().resolve())
+    if args.command == "reset-translations":
+        book = load_book(config.books_dir, args.book)
+        return reset_translations(
+            config.books_dir,
+            book,
+            input_path=args.input.expanduser().resolve() if args.input else None,
+            reset_all=args.reset_all,
+        )
+    if args.command == "verify-feedback-text":
+        book = load_book(config.books_dir, args.book)
+        return verify_feedback_text(book, args.input.expanduser().resolve())
     if args.command == "export":
         return export_book(config, args)
     raise ValueError(f"未知命令：{args.command}")

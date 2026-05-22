@@ -6,6 +6,7 @@ import time
 
 from app.config import AppConfig
 from app.models import Paragraph
+from app.placeholders import placeholder_payload_for_paragraph
 from app.terminology import Term, relevant_terms_for_text
 
 
@@ -46,7 +47,14 @@ def translate_batch(config: AppConfig, paragraphs: list[Paragraph], terms: list[
         "source_language": config.translation.source_language,
         "target_language": config.translation.target_language,
         "glossary": glossary_for_batch(paragraphs, terms or []),
-        "items": [{"id": item.id, "text": item.source} for item in paragraphs],
+        "items": [
+            {
+                "id": item.id,
+                "text": item.source,
+                "placeholders": placeholder_payload_for_paragraph(item),
+            }
+            for item in paragraphs
+        ],
     }
     last_error: Exception | None = None
     for attempt in range(config.translation.retry_count + 1):

@@ -1,6 +1,6 @@
 ---
 name: novel-translator
-description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小说、导出术语候选、导入术语表、调用 OpenAI 兼容模型翻译、检查未译/源文残留/术语一致性，并导出 TXT 或 EPUB 译本。
+description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小说、准备 Agent 工作区、导出/导入术语表、调用 OpenAI 兼容模型翻译、检查未译/源文残留/术语/占位符一致性、人工修复、反馈反查，并导出 TXT 或 EPUB 译本。
 ---
 
 # Novel Translator Skill
@@ -37,15 +37,20 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 5. 阅读 `terminology-workflow.md`，填写或审查 `<工作区>/terminology/glossary.json`。删除误判候选，补全人名、地名、组织名、能力名等稳定译名。
 6. 运行 `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
 7. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
-8. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
-9. 查看 `translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`。
-10. 直到 `pending` 为 0 后，再跑 `quality-report --book <书籍ID> --json`。未译、源文残留或术语不一致必须处理或向用户说明。
-11. 导出译本：TXT 用 `export --book <书籍ID> --format txt --output <输出.txt> --json`；EPUB 源书才可用 `--format epub`。
+8. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
+9. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
+10. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
+11. 查看 `translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`。
+12. 直到 `pending` 为 0 后，再跑 `quality-report --book <书籍ID> --json`。未译、源文残留、术语不一致或占位符缺失必须处理或向用户说明。
+13. 质量问题较少时，使用 `export-quality-fix` 导出修复表，人工填写 `translated` 后用 `import-manual-translations` 导入；坏译文用 `reset-translations` 精确清空。
+14. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
+15. 导出译本：TXT 用 `export --book <书籍ID> --format txt --output <输出.txt> --json`；EPUB 源书才可用 `--format epub`。
 
 ## 硬门槛
 
 - 未完成术语导入前，不启动真实模型翻译，除非用户明确要求跳过术语流程。
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
+- `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
 - `--dry-run` 只能用于流程验证，不代表翻译完成。
 - EPUB 导出是复制原 EPUB 并替换 spine XHTML 段落文本；复杂脚注、内联富文本、图片文字和特殊排版必须提醒用户复核。
 - 不要直接编辑私钥、API Key、`setting.toml` 或用户小说源文件。
@@ -57,4 +62,3 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 - 删除术语候选只为让状态变绿；必须保留有业务意义的稳定名词。
 - 质量报告有 warning 仍直接交付最终结果而不说明风险。
 - 把模型密钥写进工作区、报告、提交或 README。
-

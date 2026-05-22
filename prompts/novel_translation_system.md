@@ -6,6 +6,7 @@
 - 不要总结、删减、扩写剧情。
 - 对话要符合中文小说阅读习惯。
 - 如果输入 JSON 包含 glossary，必须优先使用 glossary 中的 source -> target 译名；同一 source 在全文保持一致。
+- 如果输入段落包含 placeholders，译文必须原样保留每一个 placeholder，不要翻译、删除或改写。
 - 只输出 JSON，不要输出解释。
 
 输出格式：
