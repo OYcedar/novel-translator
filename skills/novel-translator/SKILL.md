@@ -1,6 +1,6 @@
 ---
 name: novel-translator
-description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小说、准备 Agent 工作区、导出/导入术语表、调用 OpenAI 兼容模型翻译、检查未译/源文残留/术语/占位符一致性、人工修复、反馈反查，并导出 TXT 或 EPUB 译本。
+description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小说、准备 Agent 工作区、导出/导入术语表、生成章节上下文、使用翻译记忆和批次恢复调用 OpenAI 兼容模型翻译、检查质量、人工修复、反馈反查，并导出 TXT 或 EPUB 译本。
 ---
 
 # Novel Translator Skill
@@ -40,18 +40,23 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 8. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
 9. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
 10. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
-11. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
-12. 查看 `translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`。
-13. 直到 `pending` 为 0 后，再跑 `quality-report --book <书籍ID> --json`。未译、源文残留、术语不一致、占位符缺失或 EPUB 标记风险必须处理或向用户说明。
-14. 质量问题较少时，使用 `export-quality-fix` 导出修复表，人工填写 `translated` 后用 `import-manual-translations` 导入；坏译文用 `reset-translations` 精确清空。
-15. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
-16. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`。TXT 用 `export --book <书籍ID> --format txt --output <输出.txt> --json`；EPUB 源书才可用 `--format epub`。
+11. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
+12. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
+13. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
+14. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`。术语表变更后可继续使用默认翻译记忆；记忆命中会检查当前术语 hash。需要强制重译时传 `--no-memory`。
+15. 直到 `pending` 为 0 后，再跑 `run-report` 和 `quality-report`。未译、失败批次、源文残留、术语不一致、占位符缺失或 EPUB 标记风险必须处理或向用户说明。
+16. 质量问题较少时，使用 `export-quality-fix` 导出修复表，人工填写 `translated` 后用 `import-manual-translations` 导入；坏译文用 `reset-translations` 精确清空。
+17. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
+18. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`。TXT 用 `export --book <书籍ID> --format txt --output <输出.txt> --json`；EPUB 源书才可用 `--format epub`。
 
 ## 硬门槛
 
 - 未完成术语导入前，不启动真实模型翻译，除非用户明确要求跳过术语流程。
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
 - `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
+- 长篇小说建议先生成章节上下文；`context-status` 缺摘要时，只能小批量试翻或向用户说明风险。
+- 有失败批次时，先 `retry-failed` 或导出人工修复表，不要直接进入最终导出。
+- 翻译记忆命中必须匹配当前术语 hash；如果用户刚改过术语，先看 `translation-memory-status`，必要时用 `--no-memory` 强制重译。
 - `--dry-run` 只能用于流程验证，不代表翻译完成。
 - EPUB 导出是复制原 EPUB 并替换 spine XHTML 段落文本；复杂脚注、内联富文本、图片文字和特殊排版必须提醒用户复核。
 - EPUB 回写依赖导入时保存的节点定位；`validate-export` 或 `export` 出现节点定位/hash warning 时，必须说明相关段落已保留原文或需要人工复核。

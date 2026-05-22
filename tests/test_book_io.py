@@ -4,11 +4,16 @@ from pathlib import Path
 import zipfile
 
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book
+from app.config import ContextConfig
+from app.context import context_for_batch, context_status, summarize_context
 from app.feedback import verify_feedback_text
 from app.manual import export_pending_translations, import_manual_translations, reset_translations
+from app.memory import export_memory, import_memory, load_memory, lookup_memory, remember_translation, terminology_hash
 from app.models import Paragraph, save_book
 from app.placeholders import extract_placeholders, placeholder_mismatches
-from app.terminology import extract_term_candidates
+from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, run_report
+from app.terminology import Term, extract_term_candidates
+from app.translator import validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
 
@@ -248,6 +253,93 @@ def test_placeholder_detection_and_mismatch() -> None:
     assert "%d" in [item.value for item in placeholders]
     assert "<ruby>" in [item.value for item in placeholders]
     assert {"</ruby>", "[#note-1]"}.issubset({item["placeholder"] for item in missing})
+
+
+def test_translation_memory_respects_terminology_hash(tmp_path: Path) -> None:
+    books_dir = tmp_path / "books"
+    entries = []
+    terms = [Term(source="Alice", target="爱丽丝")]
+    term_hash = terminology_hash(terms)
+    remember_translation(entries, source="Alice opened the door.", translated="爱丽丝推开门。", term_hash=term_hash, model="test-model")
+
+    assert lookup_memory(entries, "Alice opened the door.", term_hash).translated == "爱丽丝推开门。"
+    assert lookup_memory(entries, "Alice opened the door.", terminology_hash([Term(source="Alice", target="艾丽丝")])) is None
+
+    from app.memory import save_memory
+
+    save_memory(books_dir, "book", entries)
+    exported = tmp_path / "memory.json"
+    export_memory(books_dir, "book", exported)
+    imported_books = tmp_path / "imported"
+    report = import_memory(imported_books, "book", exported)
+
+    assert report["summary"]["imported"] == 1
+    assert len(load_memory(imported_books, "book")) == 1
+
+
+def test_context_summary_and_batch_payload(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.\n\nTwo.\n\nThree.\n\nFour.", encoding="utf-8")
+    book = load_txt_book(source, title="Context")
+    book.paragraphs[0].translated = "一。"
+    config = ContextConfig(previous_paragraphs=1, next_paragraphs=1, chapter_summary_max_chars=8)
+
+    report = summarize_context(tmp_path / "books", book, config)
+    status = context_status(tmp_path / "books", book)
+    context = context_for_batch(book, [book.paragraphs[1]], report_context(tmp_path / "books", book.id), config)
+
+    assert report["summary"]["chapters"] == 1
+    assert status["status"] == "ok"
+    assert context["chapter_title"] == "Context"
+    assert context["previous"][0]["translated"] == "一。"
+    assert context["next"][0]["source"] == "Three."
+    assert context["chapter_summary"]
+
+
+def test_validate_llm_response_detects_batch_problems() -> None:
+    paragraphs = [
+        Paragraph(id="p1", chapter_id="c1", index=1, source="One."),
+        Paragraph(id="p2", chapter_id="c1", index=2, source="Two."),
+    ]
+
+    missing = validate_llm_response(paragraphs, {"p1": "一。"})
+    warnings = validate_llm_response(paragraphs, {"p1": "", "p2": "二。", "extra": "x"})
+
+    assert missing["errors"]
+    assert any("空译文" in item for item in warnings["warnings"])
+    assert any("未知段落 ID" in item for item in warnings["warnings"])
+
+
+def test_run_report_and_failed_ids(tmp_path: Path) -> None:
+    books_dir = tmp_path / "books"
+    record_batch(
+        books_dir,
+        "book",
+        "run-1",
+        {
+            "batch_id": "run-1-b0001",
+            "status": "failed",
+            "paragraph_ids": ["p1", "p2"],
+            "model": "test-model",
+            "duration_seconds": 0.1,
+            "retry_count": 0,
+            "error": "missing p2",
+            "warnings": [],
+        },
+    )
+
+    report = run_report(books_dir, "book")
+    failed = failed_batches(books_dir, "book")
+
+    assert report["summary"]["failed"] == 1
+    assert failed["summary"]["failed"] == 1
+    assert latest_failed_paragraph_ids(books_dir, "book") == ["p1", "p2"]
+
+
+def report_context(books_dir: Path, book_id: str) -> dict:
+    from app.context import load_context
+
+    return load_context(books_dir, book_id)
 
 
 def _quality_config():

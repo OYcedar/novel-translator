@@ -5,7 +5,8 @@ import json
 import time
 
 from app.config import AppConfig
-from app.models import Paragraph
+from app.context import context_for_batch
+from app.models import Book, Paragraph
 from app.placeholders import placeholder_payload_for_paragraph
 from app.terminology import Term, relevant_terms_for_text
 
@@ -31,7 +32,14 @@ def make_batches(paragraphs: list[Paragraph], max_chars: int) -> list[list[Parag
     return batches
 
 
-def translate_batch(config: AppConfig, paragraphs: list[Paragraph], terms: list[Term] | None = None) -> dict[str, str]:
+def translate_batch(
+    config: AppConfig,
+    paragraphs: list[Paragraph],
+    terms: list[Term] | None = None,
+    *,
+    book: Book | None = None,
+    context: dict | None = None,
+) -> dict[str, str]:
     try:
         from openai import OpenAI
     except ImportError as error:
@@ -47,6 +55,7 @@ def translate_batch(config: AppConfig, paragraphs: list[Paragraph], terms: list[
         "source_language": config.translation.source_language,
         "target_language": config.translation.target_language,
         "glossary": glossary_for_batch(paragraphs, terms or []),
+        "context": context_for_batch(book, paragraphs, context or {}, config.context) if book is not None else {},
         "items": [
             {
                 "id": item.id,
@@ -68,7 +77,11 @@ def translate_batch(config: AppConfig, paragraphs: list[Paragraph], terms: list[
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
-            return parse_translation_response(content)
+            result = parse_translation_response(content)
+            validation = validate_llm_response(paragraphs, result)
+            if validation["errors"]:
+                raise ValueError("; ".join(validation["errors"]))
+            return result
         except Exception as error:
             last_error = error
             if attempt >= config.translation.retry_count:
@@ -107,6 +120,23 @@ def parse_translation_response(content: str) -> dict[str, str]:
             continue
         item_id = str(item.get("id", "")).strip()
         text = str(item.get("text", "")).strip()
-        if item_id and text:
+        if item_id:
             result[item_id] = text
     return result
+
+
+def validate_llm_response(paragraphs: list[Paragraph], result: dict[str, str]) -> dict[str, list[str]]:
+    expected = {paragraph.id for paragraph in paragraphs}
+    received = set(result)
+    missing = sorted(expected - received)
+    unknown = sorted(received - expected)
+    empty = sorted(item_id for item_id in expected & received if not result.get(item_id, "").strip())
+    errors = []
+    warnings = []
+    if missing:
+        errors.append(f"模型响应缺少段落 ID：{', '.join(missing)}")
+    if empty:
+        warnings.append(f"模型响应包含空译文：{', '.join(empty)}")
+    if unknown:
+        warnings.append(f"模型响应包含未知段落 ID：{', '.join(unknown)}")
+    return {"errors": errors, "warnings": warnings}

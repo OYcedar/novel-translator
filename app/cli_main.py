@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.book_io import export_epub, export_txt, inspect_epub, load_source_book
 from app.config import AppConfig, EpubConfig, load_config
+from app.context import context_status, load_context, summarize_context
 from app.feedback import verify_feedback_text
 from app.manual import (
     audit_coverage_report,
@@ -15,16 +18,29 @@ from app.manual import (
     import_manual_translations,
     reset_translations,
 )
+from app.memory import (
+    export_memory,
+    import_memory,
+    load_memory,
+    lookup_memory,
+    memory_status,
+    remember_translation,
+    save_memory,
+    terminology_hash,
+)
 from app.models import load_book, persist_book, save_book, slugify
+from app.placeholders import extract_placeholders
 from app.quality import quality_report
+from app.runs import failed_batches, latest_failed_paragraph_ids, new_run_id, record_batch, run_report
 from app.terminology import (
     export_terminology_workspace,
     load_terms,
+    relevant_terms_for_text,
     save_terms,
     term_from_dict,
     validate_terms,
 )
-from app.translator import make_batches, pending_paragraphs, translate_batch
+from app.translator import make_batches, pending_paragraphs, translate_batch, validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
 
@@ -76,6 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--book", required=True)
     translate.add_argument("--max-batches", type=int)
     translate.add_argument("--dry-run", action="store_true", help="不调用模型，直接把原文写入译文字段")
+    translate.add_argument("--no-memory", action="store_true", help="不使用翻译记忆")
+    translate.add_argument("--run-id", help="指定本轮运行 ID")
 
     status = add_common(subparsers.add_parser("translation-status", help="查看翻译进度"), json_flag=True)
     status.add_argument("--book", required=True)
@@ -149,6 +167,34 @@ def build_parser() -> argparse.ArgumentParser:
     feedback = add_common(subparsers.add_parser("verify-feedback-text", help="按反馈文本反查段落"), json_flag=True)
     feedback.add_argument("--book", required=True)
     feedback.add_argument("--input", type=Path, required=True)
+
+    memory_status_parser = add_common(subparsers.add_parser("translation-memory-status", help="查看翻译记忆状态"), json_flag=True)
+    memory_status_parser.add_argument("--book", required=True)
+
+    memory_export = add_common(subparsers.add_parser("export-translation-memory", help="导出翻译记忆"), json_flag=True)
+    memory_export.add_argument("--book", required=True)
+    memory_export.add_argument("--output", type=Path, required=True)
+
+    memory_import = add_common(subparsers.add_parser("import-translation-memory", help="导入翻译记忆"), json_flag=True)
+    memory_import.add_argument("--book", required=True)
+    memory_import.add_argument("--input", type=Path, required=True)
+
+    summarize = add_common(subparsers.add_parser("summarize-context", help="生成章节上下文摘要"), json_flag=True)
+    summarize.add_argument("--book", required=True)
+
+    context_status_parser = add_common(subparsers.add_parser("context-status", help="查看章节上下文状态"), json_flag=True)
+    context_status_parser.add_argument("--book", required=True)
+
+    run_report_parser = add_common(subparsers.add_parser("run-report", help="查看翻译运行报告"), json_flag=True)
+    run_report_parser.add_argument("--book", required=True)
+
+    failed_parser = add_common(subparsers.add_parser("failed-batches", help="查看失败批次"), json_flag=True)
+    failed_parser.add_argument("--book", required=True)
+
+    retry_parser = add_common(subparsers.add_parser("retry-failed", help="重试失败批次"), json_flag=True)
+    retry_parser.add_argument("--book", required=True)
+    retry_parser.add_argument("--run-id")
+    retry_parser.add_argument("--dry-run", action="store_true")
 
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
     export.add_argument("--book", required=True)
@@ -233,6 +279,24 @@ def dispatch(args: argparse.Namespace) -> dict:
     if args.command == "verify-feedback-text":
         book = load_book(config.books_dir, args.book)
         return verify_feedback_text(book, args.input.expanduser().resolve())
+    if args.command == "translation-memory-status":
+        return memory_status(config.books_dir, args.book, load_terms(config.books_dir, args.book))
+    if args.command == "export-translation-memory":
+        return export_memory(config.books_dir, args.book, args.output.expanduser().resolve())
+    if args.command == "import-translation-memory":
+        return import_memory(config.books_dir, args.book, args.input.expanduser().resolve())
+    if args.command == "summarize-context":
+        book = load_book(config.books_dir, args.book)
+        return summarize_context(config.books_dir, book, config.context, config.llm)
+    if args.command == "context-status":
+        book = load_book(config.books_dir, args.book)
+        return context_status(config.books_dir, book)
+    if args.command == "run-report":
+        return run_report(config.books_dir, args.book)
+    if args.command == "failed-batches":
+        return failed_batches(config.books_dir, args.book)
+    if args.command == "retry-failed":
+        return retry_failed(config, args)
     if args.command == "export":
         return export_book(config, args)
     if args.command == "validate-export":
@@ -343,33 +407,172 @@ def translation_status(config: AppConfig, book_id: str) -> dict:
 def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
     terms = load_terms(config.books_dir, book.id)
+    term_hash = terminology_hash(terms)
+    context = load_context(config.books_dir, book.id)
+    memory_entries = load_memory(config.books_dir, book.id)
+    run_id = args.run_id or new_run_id()
+    target_ids = set(getattr(args, "target_ids", []) or [])
     pending = pending_paragraphs(book.paragraphs)
+    if target_ids:
+        pending = [paragraph for paragraph in pending if paragraph.id in target_ids]
+    reused_memory = 0
+    if not getattr(args, "no_memory", False) and not getattr(args, "dry_run", False):
+        for paragraph in list(pending):
+            entry = lookup_memory(memory_entries, paragraph.source, term_hash)
+            if entry is not None:
+                paragraph.translated = entry.translated
+                reused_memory += 1
+        if reused_memory:
+            persist_book(config.books_dir, book)
+            pending = pending_paragraphs(book.paragraphs)
+            if target_ids:
+                pending = [paragraph for paragraph in pending if paragraph.id in target_ids]
     batches = make_batches(pending, config.translation.batch_max_chars)
     if args.max_batches is not None:
         batches = batches[: args.max_batches]
-    translated_count = 0
-    for batch in batches:
-        if args.dry_run:
-            result = {paragraph.id: paragraph.source for paragraph in batch}
-        else:
-            result = translate_batch(config, batch, terms)
+    saved_translations = 0
+    batch_succeeded = 0
+    batch_failed = 0
+    batch_warnings = []
+    for index, batch in enumerate(batches, start=1):
+        batch_id = f"{run_id}-b{index:04d}"
+        started = time.time()
+        result: dict[str, str] = {}
+        warnings: list[str] = []
+        error = ""
+        try:
+            if getattr(args, "dry_run", False):
+                result = {paragraph.id: paragraph.source for paragraph in batch}
+            else:
+                result = translate_batch(config, batch, terms, book=book, context=context)
+            validation = validate_llm_response(batch, result)
+            warnings = validation["warnings"]
+            warnings.extend(_translation_quality_warnings(batch, result, terms))
+            if validation["errors"]:
+                raise ValueError("; ".join(validation["errors"]))
+        except Exception as exc:
+            error = str(exc)
+            batch_failed += 1
+            record_batch(
+                config.books_dir,
+                book.id,
+                run_id,
+                _batch_record(
+                    batch_id,
+                    batch,
+                    status="failed",
+                    started=started,
+                    error=error,
+                    warnings=warnings,
+                    model=config.llm.model,
+                    retry_count=0,
+                ),
+            )
+            continue
         for paragraph in batch:
             translated = result.get(paragraph.id, "").strip()
             if translated:
                 paragraph.translated = translated
-                translated_count += 1
+                saved_translations += 1
+                if not getattr(args, "dry_run", False):
+                    remember_translation(memory_entries, source=paragraph.source, translated=translated, term_hash=term_hash, model=config.llm.model)
+        batch_succeeded += 1
+        batch_warnings.extend(warnings)
+        record_batch(
+            config.books_dir,
+            book.id,
+            run_id,
+            _batch_record(
+                batch_id,
+                batch,
+                status="succeeded",
+                started=started,
+                error="",
+                warnings=warnings,
+                model=config.llm.model,
+                retry_count=0,
+            ),
+        )
         persist_book(config.books_dir, book)
+        if not getattr(args, "dry_run", False):
+            save_memory(config.books_dir, book.id, memory_entries)
     return {
-        "status": "ok",
-        "warnings": [],
+        "status": "ok" if not batch_failed else "warning",
+        "warnings": batch_warnings,
         "summary": {
             "book": book.id,
+            "run_id": run_id,
             "batches": len(batches),
-            "translated": translated_count,
+            "batch_succeeded": batch_succeeded,
+            "batch_failed": batch_failed,
+            "reused_memory": reused_memory,
+            "saved_translations": saved_translations,
+            "translated": saved_translations,
             "pending": len(pending_paragraphs(book.paragraphs)),
+            "targeted": len(target_ids),
         },
         "details": {},
     }
+
+
+def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    ids = latest_failed_paragraph_ids(config.books_dir, book.id)
+    if not ids:
+        return {"status": "ok", "warnings": [], "summary": {"book": book.id, "retried": 0, "pending": len(pending_paragraphs(book.paragraphs))}, "details": {}}
+    targets = set(ids)
+    for paragraph in book.paragraphs:
+        if paragraph.id in targets:
+            paragraph.translated = ""
+    persist_book(config.books_dir, book)
+    retry_args = argparse.Namespace(
+        book=book.id,
+        max_batches=None,
+        dry_run=args.dry_run,
+        no_memory=True,
+        run_id=args.run_id or new_run_id(),
+        target_ids=ids,
+    )
+    report = translate(config, retry_args)
+    report["summary"]["retried_ids"] = ids
+    return report
+
+
+def _batch_record(batch_id, batch, *, status: str, started: float, error: str, warnings: list[str], model: str, retry_count: int) -> dict:
+    return {
+        "batch_id": batch_id,
+        "status": status,
+        "paragraph_ids": [paragraph.id for paragraph in batch],
+        "requested_at": datetime.fromtimestamp(started, tz=timezone.utc).isoformat(),
+        "model": model,
+        "duration_seconds": round(time.time() - started, 3),
+        "retry_count": retry_count,
+        "error": error,
+        "warnings": warnings,
+    }
+
+
+def _translation_quality_warnings(batch, result: dict[str, str], terms) -> list[str]:
+    warnings = []
+    for paragraph in batch:
+        translated = result.get(paragraph.id, "")
+        if not translated.strip():
+            continue
+        missing_placeholders = [
+            placeholder.value
+            for placeholder in extract_placeholders(paragraph.source)
+            if placeholder.value not in translated
+        ]
+        if missing_placeholders:
+            warnings.append(f"段落 {paragraph.id} 缺少占位符：{', '.join(missing_placeholders)}")
+        missing_terms = [
+            term.target
+            for term in relevant_terms_for_text(terms, paragraph.source)
+            if term.target and term.target not in translated
+        ]
+        if missing_terms:
+            warnings.append(f"段落 {paragraph.id} 缺少术语译名：{', '.join(missing_terms)}")
+    return warnings
 
 
 def export_terminology(config: AppConfig, args: argparse.Namespace) -> dict:

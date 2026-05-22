@@ -40,7 +40,13 @@ python3 main.py --agent-mode terminology-status --book <书籍ID> --json
 python3 main.py --agent-mode prepare-agent-workspace --book <书籍ID> --output-dir ./workspace --json
 python3 main.py --agent-mode validate-agent-workspace --book <书籍ID> --workspace ./workspace --json
 python3 main.py --agent-mode audit-coverage --book <书籍ID> --json
+python3 main.py --agent-mode summarize-context --book <书籍ID> --json
+python3 main.py --agent-mode context-status --book <书籍ID> --json
 python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --json
+python3 main.py --agent-mode run-report --book <书籍ID> --json
+python3 main.py --agent-mode failed-batches --book <书籍ID> --json
+python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+python3 main.py --agent-mode translation-memory-status --book <书籍ID> --json
 python3 main.py --agent-mode translation-status --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
 python3 main.py --agent-mode export-pending-translations --book <书籍ID> --output ./pending.json --json
@@ -79,11 +85,13 @@ skills/novel-translator/SKILL.md
 8. `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 导出完整 Agent 工作区。
 9. `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json` 验收工作区。
 10. `audit-coverage --book <书籍ID> --json` 查看覆盖范围和可导出格式。
-11. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
-12. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
-13. `quality-report --book <书籍ID> --json` 检查未译、源语言残留、术语不一致和占位符缺失。
-14. 如需人工处理，使用 `export-pending-translations`、`export-quality-fix`、`import-manual-translations` 和 `reset-translations` 闭环修复。
-15. `export` 导出 TXT 或 EPUB。
+11. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再用 `context-status` 确认章节上下文齐全。
+12. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
+13. `run-report --book <书籍ID> --json` 检查批次运行记录；如有失败，先用 `retry-failed --book <书籍ID> --json` 重试。
+14. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
+15. `quality-report --book <书籍ID> --json` 检查未译、源语言残留、术语不一致和占位符缺失。
+16. 如需人工处理，使用 `export-pending-translations`、`export-quality-fix`、`import-manual-translations` 和 `reset-translations` 闭环修复。
+17. `export` 导出 TXT 或 EPUB。
 
 ## 术语表流程
 
@@ -122,6 +130,43 @@ workspace/
 ```
 
 翻译时，命中当前批次原文的术语会被注入模型请求的 `glossary` 字段。质量报告会检查：如果原文包含术语 `source`，译文必须包含对应 `target`。
+
+## 长篇稳定翻译
+
+工具会在每本书目录下维护三类长篇状态：
+
+```text
+data/books/<书籍ID>/
+  memory.json
+  context.json
+  runs/
+```
+
+`memory.json` 是翻译记忆，按源文 hash 和当前术语 hash 复用译文；术语表变化后，旧记忆不会自动命中，避免旧译名污染新译名。可用这些命令查看或迁移：
+
+```bash
+python3 main.py --agent-mode translation-memory-status --book <书籍ID> --json
+python3 main.py --agent-mode export-translation-memory --book <书籍ID> --output ./memory.json --json
+python3 main.py --agent-mode import-translation-memory --book <书籍ID> --input ./memory.json --json
+```
+
+`context.json` 保存章节摘要。`summarize-context` 会优先使用当前 OpenAI 兼容配置生成模型摘要；如果缺依赖或调用失败，会 warning 并回落到抽取式摘要。`translate` 会把章节标题、章节摘要、前后段落、前文已译片段、相关术语和占位符一起发给模型。长篇小说建议先运行：
+
+```bash
+python3 main.py --agent-mode summarize-context --book <书籍ID> --json
+python3 main.py --agent-mode context-status --book <书籍ID> --json
+```
+
+`runs/` 保存每次翻译运行的批次记录，包括批次 ID、段落 ID、请求时间、耗时、模型、错误和 warning。失败批次不会写入译文缓存，成功批次会增量保存。常用命令：
+
+```bash
+python3 main.py --agent-mode translate --book <书籍ID> --run-id first-pass --json
+python3 main.py --agent-mode run-report --book <书籍ID> --json
+python3 main.py --agent-mode failed-batches --book <书籍ID> --json
+python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+```
+
+模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。
 
 ## Agent 工作区与人工修复
 

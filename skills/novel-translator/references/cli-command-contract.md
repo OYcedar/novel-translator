@@ -42,14 +42,23 @@ python3 main.py --agent-mode <命令> ...
 | `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` | 导出 Agent 分析所需的工作区 | 工作区包含 manifest、book-summary、text-scope、terminology 和 quality 文件 | 删除不完整工作区后重跑 |
 | `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json` | 校验工作区结构和段落 ID | `status` 不是 `error` | 按 errors 修工作区或重新 prepare |
 | `audit-coverage --book <书籍ID> --json` | 审计段落翻译覆盖和可导出格式 | 最终交付前 pending 应为 0 | pending 不为 0 时继续翻译或人工修复 |
+| `summarize-context --book <书籍ID> --json` | 生成章节上下文摘要 | `summary.chapters` 等于章节数 | 长篇小说缺上下文时先补摘要 |
+| `context-status --book <书籍ID> --json` | 检查章节上下文覆盖 | `status` 为 `ok` | 缺失章节摘要时重跑 summarize |
 
 ## 翻译与检查
 
 | 命令 | 用途 | 成功判断 | 失败处理 |
 | --- | --- | --- | --- |
-| `translate --book <书籍ID> --max-batches 1 --json` | 小批量真实翻译 | 命令正常结束，pending 下降 | 看质量报告，不盲目全量 |
-| `translate --book <书籍ID> --json` | 继续翻译所有未译段落 | pending 持续下降 | 停滞时检查模型配置、术语或手动处理 |
+| `translate --book <书籍ID> --max-batches 1 --json` | 小批量真实翻译 | `summary.batch_failed` 为 0，pending 下降 | 看 run-report 和质量报告，不盲目全量 |
+| `translate --book <书籍ID> --json` | 继续翻译所有未译段落，默认使用翻译记忆 | pending 持续下降 | 停滞时检查模型配置、术语、失败批次或手动处理 |
+| `translate --book <书籍ID> --no-memory --json` | 绕过翻译记忆强制请求模型 | 用于术语大改后的重译 | 成本更高，先确认用户意图 |
 | `translate --book <书籍ID> --dry-run --json` | 不调用模型，把原文写入译文字段验证流程 | 只用于测试流程 | 不得当真实译文交付 |
+| `translation-memory-status --book <书籍ID> --json` | 查看翻译记忆数量和当前术语 hash 可复用数量 | `summary.reusable_entries` 可解释 | 术语变更后可复用数降低是正常现象 |
+| `export-translation-memory --book <书籍ID> --output <文件> --json` | 导出翻译记忆 | 输出文件存在 | 用于迁移或备份 |
+| `import-translation-memory --book <书籍ID> --input <文件> --json` | 导入翻译记忆 | `summary.imported` 可解释 | 修 JSON 或缺字段后重跑 |
+| `run-report --book <书籍ID> --json` | 查看翻译运行和批次统计 | 最终交付前 failed 应为 0 | 有失败批次先 retry-failed 或人工修复 |
+| `failed-batches --book <书籍ID> --json` | 列出失败批次明细 | `summary.failed` 可解释 | 结合错误原因修配置或重试 |
+| `retry-failed --book <书籍ID> --json` | 只重试失败批次对应段落 | batch_failed 下降或 pending 下降 | 仍失败时导出人工修复表 |
 | `translation-status --book <书籍ID> --json` | 查看总数、已译、待译和进度 | 数量可解释 | pending 不下降时排查翻译请求 |
 | `quality-report --book <书籍ID> --json` | 检查未译、源文残留、术语不一致和占位符缺失 | 最终交付前应为 `ok` | 按 details 修译文、术语或占位符 |
 

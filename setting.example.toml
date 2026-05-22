@@ -12,6 +12,11 @@ batch_max_chars = 4000
 retry_count = 3
 retry_delay = 2
 
+[context]
+previous_paragraphs = 3
+next_paragraphs = 2
+chapter_summary_max_chars = 1200
+
 [quality]
 source_residual_patterns = [
   "[\\u3040-\\u30ff]+",

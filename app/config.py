@@ -29,6 +29,13 @@ class TranslationConfig:
 
 
 @dataclass(frozen=True)
+class ContextConfig:
+    previous_paragraphs: int = 3
+    next_paragraphs: int = 2
+    chapter_summary_max_chars: int = 1200
+
+
+@dataclass(frozen=True)
 class QualityConfig:
     source_residual_patterns: tuple[str, ...] = ()
 
@@ -47,6 +54,7 @@ class AppConfig:
     root: Path
     llm: LlmConfig
     translation: TranslationConfig
+    context: ContextConfig
     quality: QualityConfig
     epub: EpubConfig
 
@@ -74,6 +82,7 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     raw = load_toml(path)
     llm_raw = raw.get("llm", {})
     translation_raw = raw.get("translation", {})
+    context_raw = raw.get("context", {})
     quality_raw = raw.get("quality", {})
     epub_raw = raw.get("epub", {})
     llm = LlmConfig(
@@ -95,6 +104,11 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     quality = QualityConfig(
         source_residual_patterns=tuple(str(item) for item in quality_raw.get("source_residual_patterns", []))
     )
+    context = ContextConfig(
+        previous_paragraphs=int(context_raw.get("previous_paragraphs", 3)),
+        next_paragraphs=int(context_raw.get("next_paragraphs", 2)),
+        chapter_summary_max_chars=int(context_raw.get("chapter_summary_max_chars", 1200)),
+    )
     epub = EpubConfig(
         parser=str(epub_raw.get("parser", "auto")),
         include_non_linear_spine=bool(epub_raw.get("include_non_linear_spine", False)),
@@ -102,7 +116,7 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         warn_on_ruby=bool(epub_raw.get("warn_on_ruby", True)),
         warn_on_duplicate_source=bool(epub_raw.get("warn_on_duplicate_source", True)),
     )
-    return AppConfig(root=root, llm=llm, translation=translation, quality=quality, epub=epub)
+    return AppConfig(root=root, llm=llm, translation=translation, context=context, quality=quality, epub=epub)
 
 
 def load_toml(path: Path) -> dict:

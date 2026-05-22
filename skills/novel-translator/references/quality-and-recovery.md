@@ -11,10 +11,11 @@
 ## 处理顺序
 
 1. 先处理术语表错误。术语错误会放大后续翻译问题。
-2. 再处理未译段落。pending 较多时继续 `translate`；少量时可人工修复。
-3. 再处理占位符缺失。占位符通常是 `{name}`、`%s`、HTML 标签或脚注锚点，必须原样保留。
-4. 处理 EPUB 标记风险。风险不一定阻止导出，但必须提醒用户在阅读器中复核相关段落。
-5. 最后处理源文残留。确认是人名、拟声词、品牌名等应保留片段时，在术语表或配置中说明；不要全局关闭检查来掩盖漏翻。
+2. 再处理失败批次。先看 `run-report` 和 `failed-batches`，能重试就 `retry-failed`，不能重试再人工修复。
+3. 再处理未译段落。pending 较多时继续 `translate`；少量时可人工修复。
+4. 再处理占位符缺失。占位符通常是 `{name}`、`%s`、HTML 标签或脚注锚点，必须原样保留。
+5. 处理 EPUB 标记风险。风险不一定阻止导出，但必须提醒用户在阅读器中复核相关段落。
+6. 最后处理源文残留。确认是人名、拟声词、品牌名等应保留片段时，在术语表或配置中说明；不要全局关闭检查来掩盖漏翻。
 
 ## 常见情况
 
@@ -28,6 +29,18 @@ python3 main.py --agent-mode translate --book <书籍ID> --json
 ```
 
 如果 pending 不下降，检查模型配置、网络、API 返回格式和提示词。
+
+### 失败批次
+
+运行：
+
+```bash
+python3 main.py --agent-mode run-report --book <书籍ID> --json
+python3 main.py --agent-mode failed-batches --book <书籍ID> --json
+python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+```
+
+失败批次不会污染译文缓存。`retry-failed` 只会重试失败批次对应段落；如果仍失败，导出 `export-quality-fix` 或 `export-pending-translations` 交给人工修复。
 
 ### 术语不一致
 
@@ -71,6 +84,7 @@ python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input <反
 
 ```bash
 python3 main.py --agent-mode translation-status --book <书籍ID> --json
+python3 main.py --agent-mode run-report --book <书籍ID> --json
 python3 main.py --agent-mode terminology-status --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
 ```
