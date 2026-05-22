@@ -1,0 +1,20 @@
+[project]
+name = "novel-translator"
+version = "0.1.0"
+description = "Agent-friendly novel translation toolkit for EPUB and TXT books"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=2.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+novel-translator = "app.cli_main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+

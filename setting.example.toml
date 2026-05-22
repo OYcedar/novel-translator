@@ -1,0 +1,20 @@
+[llm]
+base_url = "https://api.example.com/v1"
+api_key = "YOUR_API_KEY"
+model = "example-model"
+timeout = 600
+
+[translation]
+target_language = "zh-Hans"
+source_language = "auto"
+system_prompt_file = "prompts/novel_translation_system.md"
+batch_max_chars = 4000
+retry_count = 3
+retry_delay = 2
+
+[quality]
+source_residual_patterns = [
+  "[\\u3040-\\u30ff]+",
+  "[A-Za-z]{24,}",
+]
+
