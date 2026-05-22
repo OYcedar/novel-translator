@@ -55,6 +55,7 @@ class AutomationConfig:
     auto_retry_failed: bool = True
     folder_input_dir: str = "../原文"
     folder_output_dir: str = "../已翻译"
+    work_records_dir: str = "../workspace/books"
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,7 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         auto_retry_failed=bool(automation_raw.get("auto_retry_failed", True)),
         folder_input_dir=str(automation_raw.get("folder_input_dir", "../原文")),
         folder_output_dir=str(automation_raw.get("folder_output_dir", "../已翻译")),
+        work_records_dir=str(automation_raw.get("work_records_dir", "../workspace/books")),
     )
     export = ExportConfig(
         bilingual=bool(export_raw.get("bilingual", False)),

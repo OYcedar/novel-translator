@@ -46,6 +46,7 @@ from app.terminology import (
     validate_terms,
 )
 from app.translator import make_batches, pending_paragraphs, translate_batch, validate_llm_response
+from app.work_records import collect_external_logs, collect_files, init_work_records
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
 
@@ -222,6 +223,12 @@ def build_parser() -> argparse.ArgumentParser:
     retry_parser.add_argument("--run-id")
     retry_parser.add_argument("--dry-run", action="store_true")
 
+    records_parser = add_common(subparsers.add_parser("work-records", help="初始化或收纳单本小说的工作记录"), json_flag=True)
+    records_parser.add_argument("--book", required=True)
+    records_parser.add_argument("--collect-log-dir", type=Path, help="复制外部日志目录中的翻译脚本和日志")
+    records_parser.add_argument("--collect-file", type=Path, action="append", default=[], help="复制外部文件到本书 imports 目录")
+    records_parser.add_argument("--log-pattern", default="translate*", help="收纳日志时使用的文件匹配模式")
+
     analyze = add_common(subparsers.add_parser("analyze-book", help="生成译前项目画像"), json_flag=True)
     analyze.add_argument("--book", required=True)
 
@@ -394,6 +401,8 @@ def dispatch(args: argparse.Namespace) -> dict:
         return failed_batches(config.books_dir, args.book)
     if args.command == "retry-failed":
         return retry_failed(config, args)
+    if args.command == "work-records":
+        return work_records(config, args)
     if args.command == "analyze-book":
         book = load_book(config.books_dir, args.book)
         return analyze_book_report(config.books_dir, book, load_terms(config.books_dir, book.id))
@@ -456,6 +465,7 @@ def add_book(config: AppConfig, args: argparse.Namespace) -> dict:
     if args.id:
         book.id = slugify(args.id)
     target_dir = save_book(config.books_dir, book, source_path)
+    records = init_work_records(book, _work_records_root(config))
     summary = {
         "book": book.id,
         "title": book.title,
@@ -463,6 +473,7 @@ def add_book(config: AppConfig, args: argparse.Namespace) -> dict:
         "chapters": len(book.chapters),
         "paragraphs": len(book.paragraphs),
         "data_dir": str(target_dir),
+        "work_records_dir": records["summary"]["record_dir"],
     }
     warnings = []
     if book.source_type == "epub":
@@ -920,6 +931,25 @@ def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
     report = translate(config, retry_args)
     report["summary"]["retried_ids"] = ids
     return report
+
+
+def work_records(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    records_root = _work_records_root(config)
+    if args.collect_file:
+        return collect_files(book, records_root, [path.expanduser().resolve() for path in args.collect_file])
+    if args.collect_log_dir:
+        return collect_external_logs(
+            book,
+            records_root,
+            args.collect_log_dir.expanduser().resolve(),
+            pattern=args.log_pattern,
+        )
+    return init_work_records(book, records_root)
+
+
+def _work_records_root(config: AppConfig) -> Path:
+    return _configured_dir(config.root, None, config.automation.work_records_dir)
 
 
 def run_pipeline(config: AppConfig, args: argparse.Namespace) -> dict:

@@ -34,6 +34,7 @@ stop_on_warning = false
 auto_retry_failed = true
 folder_input_dir = "../原文"
 folder_output_dir = "../已翻译"
+work_records_dir = "../workspace/books"
 
 [export]
 bilingual = false

@@ -174,9 +174,34 @@ python3 main.py --agent-mode translate --book <书籍ID> --run-id first-pass --j
 python3 main.py --agent-mode run-report --book <书籍ID> --json
 python3 main.py --agent-mode failed-batches --book <书籍ID> --json
 python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+python3 main.py --agent-mode work-records --book <书籍ID> --json
+python3 main.py --agent-mode work-records --book <书籍ID> --collect-log-dir ../logs --json
 ```
 
 模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。
+
+## 单本小说工作记录
+
+每本小说可以有独立的过程记录目录，默认位于：
+
+```text
+../workspace/books/<书籍ID>/
+  logs/
+  reports/
+  workspace/
+  imports/
+  delivery/
+```
+
+注册书籍时会自动初始化该目录。也可以手动执行：
+
+```bash
+python3 main.py --agent-mode work-records --book <书籍ID> --json
+python3 main.py --agent-mode work-records --book <书籍ID> --collect-log-dir ../logs --json
+python3 main.py --agent-mode work-records --book <书籍ID> --collect-file ../import_terms.json --json
+```
+
+`data/books/<书籍ID>/` 仍然保存核心翻译状态；`work-records` 目录用于收纳后台脚本、日志、外部术语表、质检报告、审校材料和交付包。
 
 ## Agent 工作区与人工修复
 
