@@ -4,6 +4,7 @@ from pathlib import Path
 import zipfile
 
 from app.book_io import export_txt, load_epub_book, load_txt_book
+from app.terminology import extract_term_candidates
 
 
 def test_load_txt_book_splits_blank_line_paragraphs(tmp_path: Path) -> None:
@@ -68,3 +69,14 @@ def test_load_epub_book_reads_spine_xhtml(tmp_path: Path) -> None:
     assert len(book.chapters) == 1
     assert [item.source for item in book.paragraphs] == ["第一章", "她推开门。", "风从走廊尽头吹来。"]
 
+
+def test_extract_term_candidates_counts_repeated_names(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("Alice opened the door.\n\nAlice saw Bob.\n\nBob smiled at Alice.", encoding="utf-8")
+    book = load_txt_book(source)
+
+    terms = extract_term_candidates(book)
+
+    by_source = {term.source: term for term in terms}
+    assert by_source["Alice"].occurrences == 3
+    assert by_source["Bob"].occurrences == 2

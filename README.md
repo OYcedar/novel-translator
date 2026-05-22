@@ -33,6 +33,9 @@ python3 main.py --agent-mode doctor --json
 python3 main.py --agent-mode add-book --path ./novel.epub --json
 python3 main.py --agent-mode list --json
 python3 main.py --agent-mode text-scope --book <书籍ID> --json
+python3 main.py --agent-mode export-terminology --book <书籍ID> --output-dir ./workspace --json
+python3 main.py --agent-mode import-terminology --book <书籍ID> --input ./workspace/terminology/glossary.json --json
+python3 main.py --agent-mode terminology-status --book <书籍ID> --json
 python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --json
 python3 main.py --agent-mode translation-status --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
@@ -51,10 +54,52 @@ python3 main.py --agent-mode translate --book <书籍ID> --dry-run --json
 1. `doctor --json` 检查配置。
 2. `add-book --path <小说文件> --json` 注册小说，记录返回的书籍 ID。
 3. `text-scope --book <书籍ID> --json` 确认章节和段落数量。
-4. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
-5. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
-6. `quality-report --book <书籍ID> --json` 检查未译和源语言残留。
-7. `export` 导出 TXT 或 EPUB。
+4. `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
+5. 人工或 Agent 填写 `<工作区>/terminology/glossary.json` 里的 `target`，删除不需要的候选，统一人名、地名、组织名、能力名等译名。
+6. `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
+7. `terminology-status --book <书籍ID> --json` 确认没有冲突；空译名会作为 warning。
+8. `translate --book <书籍ID> --max-batches 1 --json` 先小批量试翻。
+9. `translation-status --book <书籍ID> --json` 查看进度，继续执行 `translate` 直到 pending 为 0。
+10. `quality-report --book <书籍ID> --json` 检查未译、源语言残留和术语不一致。
+11. `export` 导出 TXT 或 EPUB。
+
+## 术语表流程
+
+术语表保存在：
+
+```text
+data/books/<书籍ID>/terms.json
+```
+
+导出的工作区结构：
+
+```text
+workspace/
+  manifest.json
+  terminology/
+    glossary.json
+    contexts/
+      term-contexts.json
+```
+
+`glossary.json` 示例：
+
+```json
+{
+  "terms": [
+    {
+      "source": "Alice",
+      "target": "爱丽丝",
+      "category": "name",
+      "note": "主角",
+      "occurrences": 12,
+      "sample_ids": ["c0001-p00003"]
+    }
+  ]
+}
+```
+
+翻译时，命中当前批次原文的术语会被注入模型请求的 `glossary` 字段。质量报告会检查：如果原文包含术语 `source`，译文必须包含对应 `target`。
 
 ## 数据位置
 

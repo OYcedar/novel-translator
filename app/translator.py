@@ -6,6 +6,7 @@ import time
 
 from app.config import AppConfig
 from app.models import Paragraph
+from app.terminology import Term, relevant_terms_for_text
 
 
 def pending_paragraphs(paragraphs: Iterable[Paragraph]) -> list[Paragraph]:
@@ -29,7 +30,7 @@ def make_batches(paragraphs: list[Paragraph], max_chars: int) -> list[list[Parag
     return batches
 
 
-def translate_batch(config: AppConfig, paragraphs: list[Paragraph]) -> dict[str, str]:
+def translate_batch(config: AppConfig, paragraphs: list[Paragraph], terms: list[Term] | None = None) -> dict[str, str]:
     try:
         from openai import OpenAI
     except ImportError as error:
@@ -44,6 +45,7 @@ def translate_batch(config: AppConfig, paragraphs: list[Paragraph]) -> dict[str,
     payload = {
         "source_language": config.translation.source_language,
         "target_language": config.translation.target_language,
+        "glossary": glossary_for_batch(paragraphs, terms or []),
         "items": [{"id": item.id, "text": item.source} for item in paragraphs],
     }
     last_error: Exception | None = None
@@ -67,6 +69,25 @@ def translate_batch(config: AppConfig, paragraphs: list[Paragraph]) -> dict[str,
     raise RuntimeError(f"翻译请求失败：{last_error}") from last_error
 
 
+def glossary_for_batch(paragraphs: list[Paragraph], terms: list[Term]) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    glossary: list[dict[str, str]] = []
+    for paragraph in paragraphs:
+        for term in relevant_terms_for_text(terms, paragraph.source):
+            if term.source in seen:
+                continue
+            seen.add(term.source)
+            glossary.append(
+                {
+                    "source": term.source,
+                    "target": term.target,
+                    "category": term.category,
+                    "note": term.note,
+                }
+            )
+    return glossary
+
+
 def parse_translation_response(content: str) -> dict[str, str]:
     raw = json.loads(content)
     items = raw.get("items", raw if isinstance(raw, list) else [])
@@ -81,4 +102,3 @@ def parse_translation_response(content: str) -> dict[str, str]:
         if item_id and text:
             result[item_id] = text
     return result
-

@@ -9,6 +9,13 @@ from app.book_io import export_epub, export_txt, load_source_book
 from app.config import AppConfig, load_config
 from app.models import load_book, persist_book, save_book, slugify
 from app.quality import quality_report
+from app.terminology import (
+    export_terminology_workspace,
+    load_terms,
+    save_terms,
+    term_from_dict,
+    validate_terms,
+)
 from app.translator import make_batches, pending_paragraphs, translate_batch
 
 
@@ -64,6 +71,26 @@ def build_parser() -> argparse.ArgumentParser:
     quality = add_common(subparsers.add_parser("quality-report", help="检查未译和源语言残留"), json_flag=True)
     quality.add_argument("--book", required=True)
 
+    export_terms = add_common(
+        subparsers.add_parser("export-terminology", help="导出术语候选和上下文，供 Agent 或人工填写"),
+        json_flag=True,
+    )
+    export_terms.add_argument("--book", required=True)
+    export_terms.add_argument("--output-dir", type=Path, required=True)
+
+    import_terms = add_common(
+        subparsers.add_parser("import-terminology", help="导入审查后的正文术语表"),
+        json_flag=True,
+    )
+    import_terms.add_argument("--book", required=True)
+    import_terms.add_argument("--input", type=Path, required=True)
+
+    terminology_status = add_common(
+        subparsers.add_parser("terminology-status", help="查看当前书籍术语表状态"),
+        json_flag=True,
+    )
+    terminology_status.add_argument("--book", required=True)
+
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
     export.add_argument("--book", required=True)
     export.add_argument("--format", choices=["txt", "epub"], required=True)
@@ -95,7 +122,13 @@ def dispatch(args: argparse.Namespace) -> dict:
         return translate(config, args)
     if args.command == "quality-report":
         book = load_book(config.books_dir, args.book)
-        return quality_report(book, config.quality)
+        return quality_report(book, config.quality, load_terms(config.books_dir, book.id))
+    if args.command == "export-terminology":
+        return export_terminology(config, args)
+    if args.command == "import-terminology":
+        return import_terminology(config, args)
+    if args.command == "terminology-status":
+        return terminology_status(config, args.book)
     if args.command == "export":
         return export_book(config, args)
     raise ValueError(f"未知命令：{args.command}")
@@ -190,6 +223,7 @@ def translation_status(config: AppConfig, book_id: str) -> dict:
 
 def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
+    terms = load_terms(config.books_dir, book.id)
     pending = pending_paragraphs(book.paragraphs)
     batches = make_batches(pending, config.translation.batch_max_chars)
     if args.max_batches is not None:
@@ -199,7 +233,7 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
         if args.dry_run:
             result = {paragraph.id: paragraph.source for paragraph in batch}
         else:
-            result = translate_batch(config, batch)
+            result = translate_batch(config, batch, terms)
         for paragraph in batch:
             translated = result.get(paragraph.id, "").strip()
             if translated:
@@ -216,6 +250,77 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
             "pending": len(pending_paragraphs(book.paragraphs)),
         },
         "details": {},
+    }
+
+
+def export_terminology(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    output_dir = args.output_dir.expanduser().resolve()
+    details = export_terminology_workspace(book, output_dir, load_terms(config.books_dir, book.id))
+    return {
+        "status": "ok",
+        "warnings": [],
+        "summary": {
+            "book": book.id,
+            "candidate_count": details["candidate_count"],
+            "filled_count": details["filled_count"],
+            "output_dir": str(output_dir),
+        },
+        "details": details,
+    }
+
+
+def import_terminology(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    input_path = args.input.expanduser().resolve()
+    raw = json.loads(input_path.read_text(encoding="utf-8"))
+    items = raw.get("terms", raw if isinstance(raw, list) else [])
+    if not isinstance(items, list):
+        raise ValueError("术语表必须是数组，或包含 terms 数组的对象")
+    terms = [term_from_dict(item) for item in items if isinstance(item, dict)]
+    errors, warnings = validate_terms(terms)
+    if errors:
+        return {
+            "status": "error",
+            "errors": [{"code": "terminology_invalid", "message": message} for message in errors],
+            "warnings": warnings,
+            "summary": {"book": book.id, "input": str(input_path)},
+            "details": {},
+        }
+    saved_path = save_terms(config.books_dir, book.id, terms)
+    return {
+        "status": "ok",
+        "warnings": warnings,
+        "summary": {
+            "book": book.id,
+            "input": str(input_path),
+            "saved": str(saved_path),
+            "term_count": len(terms),
+            "filled_count": sum(1 for term in terms if term.target),
+            "empty_count": sum(1 for term in terms if not term.target),
+        },
+        "details": {},
+    }
+
+
+def terminology_status(config: AppConfig, book_id: str) -> dict:
+    book = load_book(config.books_dir, book_id)
+    terms = load_terms(config.books_dir, book.id)
+    errors, warnings = validate_terms(terms)
+    status = "error" if errors else "ok"
+    if not errors and warnings:
+        status = "warning"
+    return {
+        "status": status,
+        "errors": [{"code": "terminology_invalid", "message": message} for message in errors],
+        "warnings": warnings,
+        "summary": {
+            "book": book.id,
+            "term_count": len(terms),
+            "filled_count": sum(1 for term in terms if term.target),
+            "empty_count": sum(1 for term in terms if not term.target),
+        },
+        "details": {"terms": [term.__dict__ for term in terms[:100]]},
     }
 
 
