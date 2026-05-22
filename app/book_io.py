@@ -219,6 +219,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
         "spine_missing": 0,
         "nav_broken_links": 0,
         "nav_empty_anchors": 0,
+        "nav_linear_spine_count": 0,
         "toc_broken_links": 0,
         "toc_prefixed_namespace": False,
     }
@@ -258,6 +259,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
             toc_path = _find_toc_path(opf, manifest, opf_path)
             manifest_missing = _missing_manifest_items(manifest, opf_path, names)
             spine_missing = [item.path for item in all_spine_items if item.path not in names]
+            nav_linear_spine = [item.path for item in all_spine_items if nav_path and item.path == nav_path and item.linear]
             nav_links = _validate_link_file(archive, nav_path, names, "href") if nav_path else {"count": 0, "broken": [], "empty_anchors": 0}
             toc_links = _validate_link_file(archive, toc_path, names, "src") if toc_path else {"count": 0, "broken": [], "empty_anchors": 0}
             toc_prefixed_namespace = _has_prefixed_root(archive, toc_path, "ncx") if toc_path else False
@@ -278,6 +280,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                     "nav_link_count": nav_links["count"],
                     "nav_broken_links": len(nav_links["broken"]),
                     "nav_empty_anchors": nav_links["empty_anchors"],
+                    "nav_linear_spine_count": len(nav_linear_spine),
                     "toc_link_count": toc_links["count"],
                     "toc_broken_links": len(toc_links["broken"]),
                     "toc_prefixed_namespace": toc_prefixed_namespace,
@@ -295,6 +298,8 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                 errors.append({"code": "epub_nav_broken_link", "message": f"nav 链接不存在：{href} -> {target}"})
             if nav_links["empty_anchors"]:
                 errors.append({"code": "epub_nav_empty_anchor", "message": f"nav 中存在 {nav_links['empty_anchors']} 个空链接文本"})
+            if nav_linear_spine:
+                errors.append({"code": "epub_nav_linear_spine", "message": "nav.xhtml 位于线性阅读顺序中，部分手机阅读器会把目录页当作正文第一章"})
             for src, target in toc_links["broken"][:20]:
                 errors.append({"code": "epub_toc_broken_link", "message": f"toc 链接不存在：{src} -> {target}"})
             if toc_prefixed_namespace:
@@ -302,6 +307,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
             details = {
                 "manifest_missing": manifest_missing,
                 "spine_missing": spine_missing,
+                "nav_linear_spine": nav_linear_spine,
                 "nav_broken_links": nav_links["broken"],
                 "toc_broken_links": toc_links["broken"],
             }
@@ -674,6 +680,7 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None,
     title_translations = _chapter_title_translations(book)
     source = Path(book.source_file)
     with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(output, "w") as dst:
+        opf_path = book.metadata.get("epub", {}).get("opf_path", "")
         nav_path = book.metadata.get("epub", {}).get("nav_path", "")
         toc_path = book.metadata.get("epub", {}).get("toc_path", "")
         infos = src.infolist()
@@ -686,7 +693,9 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None,
             data = src.read(info.filename)
             is_nav = config.translate_nav and info.filename == nav_path
             is_toc = config.translate_toc and info.filename == toc_path
-            if title_translations and (is_nav or is_toc):
+            if info.filename == opf_path and nav_path:
+                data = _mark_nav_spine_non_linear(data)
+            elif title_translations and (is_nav or is_toc):
                 data, nav_warnings = _replace_navigation_text(data, title_translations)
                 warnings.extend(f"{info.filename}: {message}" for message in nav_warnings)
             else:
@@ -696,6 +705,27 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None,
                     warnings.extend(f"{info.filename}: {message}" for message in chapter_warnings)
             _write_epub_member(dst, info, data)
     return {"warnings": warnings, "warning_count": len(warnings)}
+
+
+def _mark_nav_spine_non_linear(data: bytes) -> bytes:
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return data
+    nav_ids = {
+        item.attrib.get("id", "")
+        for item in root.iter()
+        if _local_name(item.tag) == "item" and "nav" in item.attrib.get("properties", "").split()
+    }
+    if not nav_ids:
+        return data
+    changed = False
+    for itemref in root.iter():
+        if _local_name(itemref.tag) == "itemref" and itemref.attrib.get("idref", "") in nav_ids:
+            if itemref.attrib.get("linear") != "no":
+                itemref.set("linear", "no")
+                changed = True
+    return _serialize_xml(root) if changed else data
 
 
 def _write_epub_member(dst: zipfile.ZipFile, info: zipfile.ZipInfo, data: bytes, *, force_stored: bool = False) -> None:

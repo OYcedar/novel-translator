@@ -227,11 +227,13 @@ def test_epub_export_translates_spine_nav_without_breaking_links(tmp_path: Path)
     with zipfile.ZipFile(output) as archive:
         nav = archive.read("OEBPS/Text/nav.xhtml").decode("utf-8")
         chapter = archive.read("OEBPS/Text/chapter1.xhtml").decode("utf-8")
+        opf = archive.read("OEBPS/content.opf").decode("utf-8")
 
     assert 'href="chapter1.xhtml"' in nav
     assert ">第一章译名</a>" in nav
     assert "<a href=\"chapter1.xhtml\" />" not in nav
     assert "你好。" in chapter
+    assert '<itemref idref="nav" linear="no"' in opf
 
 
 def test_epub_export_writes_mimetype_first_and_uncompressed(tmp_path: Path) -> None:
@@ -333,6 +335,49 @@ def test_validate_epub_reports_empty_nav_anchor(tmp_path: Path) -> None:
     assert report["status"] == "error"
     assert report["summary"]["nav_empty_anchors"] == 1
     assert any(error["code"] == "epub_nav_empty_anchor" for error in report["errors"])
+
+
+def test_validate_epub_reports_linear_nav_spine(tmp_path: Path) -> None:
+    epub = tmp_path / "linear-nav.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书</dc:title></metadata>
+  <manifest>
+    <item id="nav" href="Text/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="nav"/><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/nav.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><a href="chapter1.xhtml">第一章</a></li></ol></nav></body></html>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello.</p></body></html>""",
+        )
+
+    report = validate_epub(epub)
+
+    assert report["status"] == "error"
+    assert report["summary"]["nav_linear_spine_count"] == 1
+    assert any(error["code"] == "epub_nav_linear_spine" for error in report["errors"])
 
 
 def test_epub_export_keeps_ncx_default_namespace_for_mobile_readers(tmp_path: Path) -> None:
