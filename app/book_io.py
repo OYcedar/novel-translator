@@ -7,6 +7,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 import hashlib
 import html
+import posixpath
 import re
 import zipfile
 
@@ -201,6 +202,173 @@ def inspect_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
         },
         "details": details,
     }
+
+
+def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
+    config = epub_config or EpubConfig()
+    errors: list[dict[str, str]] = []
+    warnings: list[str] = []
+    details: dict[str, Any] = {}
+    summary: dict[str, Any] = {
+        "path": str(path),
+        "valid_for_local_open": False,
+        "mimetype_first": False,
+        "mimetype_uncompressed": False,
+        "manifest_missing": 0,
+        "spine_missing": 0,
+        "nav_broken_links": 0,
+        "nav_empty_anchors": 0,
+        "toc_broken_links": 0,
+    }
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+            names = set(archive.namelist())
+            if not infos:
+                errors.append({"code": "epub_empty_zip", "message": "EPUB 压缩包为空"})
+                return _epub_validation_result(errors, warnings, summary, details)
+            mimetype_info = next((info for info in infos if info.filename == "mimetype"), None)
+            summary["mimetype_first"] = bool(infos and infos[0].filename == "mimetype")
+            summary["mimetype_uncompressed"] = bool(mimetype_info and mimetype_info.compress_type == zipfile.ZIP_STORED)
+            if mimetype_info is None:
+                errors.append({"code": "epub_missing_mimetype", "message": "缺少 mimetype 文件"})
+            else:
+                mimetype = archive.read("mimetype").decode("ascii", errors="replace")
+                summary["mimetype"] = mimetype
+                if mimetype != "application/epub+zip":
+                    errors.append({"code": "epub_bad_mimetype", "message": f"mimetype 应为 application/epub+zip，当前为 {mimetype}"})
+                if not summary["mimetype_first"]:
+                    warnings.append("mimetype 不是压缩包第一项，部分阅读器可能拒绝打开")
+                if not summary["mimetype_uncompressed"]:
+                    warnings.append("mimetype 被压缩，部分阅读器可能拒绝打开")
+            if "META-INF/container.xml" not in names:
+                errors.append({"code": "epub_missing_container", "message": "缺少 META-INF/container.xml"})
+                return _epub_validation_result(errors, warnings, summary, details)
+            opf_path = _find_opf_path(archive)
+            if opf_path not in names:
+                errors.append({"code": "epub_missing_opf", "message": f"OPF 文件不存在：{opf_path}"})
+                return _epub_validation_result(errors, warnings, summary, details)
+            opf = _read_xml(archive, opf_path)
+            manifest = _opf_manifest_items(opf)
+            all_spine_items = _spine_items(opf, opf_path, EpubConfig(include_non_linear_spine=True))
+            spine_items = _spine_items(opf, opf_path, config)
+            nav_path = _find_nav_path(manifest, opf_path)
+            toc_path = _find_toc_path(opf, manifest, opf_path)
+            manifest_missing = _missing_manifest_items(manifest, opf_path, names)
+            spine_missing = [item.path for item in all_spine_items if item.path not in names]
+            nav_links = _validate_link_file(archive, nav_path, names, "href") if nav_path else {"count": 0, "broken": [], "empty_anchors": 0}
+            toc_links = _validate_link_file(archive, toc_path, names, "src") if toc_path else {"count": 0, "broken": [], "empty_anchors": 0}
+            summary.update(
+                {
+                    "epub_version": _opf_version(opf),
+                    "opf_path": opf_path,
+                    "has_nav": bool(nav_path),
+                    "has_toc": bool(toc_path),
+                    "nav_path": nav_path,
+                    "toc_path": toc_path,
+                    "manifest_count": len(manifest),
+                    "spine_count": len(all_spine_items),
+                    "linear_spine_count": len([item for item in all_spine_items if item.linear]),
+                    "chapter_count": len(spine_items),
+                    "manifest_missing": len(manifest_missing),
+                    "spine_missing": len(spine_missing),
+                    "nav_link_count": nav_links["count"],
+                    "nav_broken_links": len(nav_links["broken"]),
+                    "nav_empty_anchors": nav_links["empty_anchors"],
+                    "toc_link_count": toc_links["count"],
+                    "toc_broken_links": len(toc_links["broken"]),
+                }
+            )
+            if not nav_path:
+                warnings.append("未找到 EPUB3 nav 目录")
+            if not toc_path:
+                warnings.append("未找到 NCX toc 目录")
+            for item_id, href, full_path in manifest_missing[:20]:
+                errors.append({"code": "epub_manifest_missing", "message": f"manifest 项不存在：{item_id} {href} -> {full_path}"})
+            for missing in spine_missing[:20]:
+                errors.append({"code": "epub_spine_missing", "message": f"spine 章节文件不存在：{missing}"})
+            for href, target in nav_links["broken"][:20]:
+                errors.append({"code": "epub_nav_broken_link", "message": f"nav 链接不存在：{href} -> {target}"})
+            if nav_links["empty_anchors"]:
+                errors.append({"code": "epub_nav_empty_anchor", "message": f"nav 中存在 {nav_links['empty_anchors']} 个空链接文本"})
+            for src, target in toc_links["broken"][:20]:
+                errors.append({"code": "epub_toc_broken_link", "message": f"toc 链接不存在：{src} -> {target}"})
+            details = {
+                "manifest_missing": manifest_missing,
+                "spine_missing": spine_missing,
+                "nav_broken_links": nav_links["broken"],
+                "toc_broken_links": toc_links["broken"],
+            }
+    except zipfile.BadZipFile:
+        errors.append({"code": "epub_bad_zip", "message": "文件不是有效 ZIP/EPUB"})
+    except ET.ParseError as error:
+        errors.append({"code": "epub_xml_parse_error", "message": f"EPUB XML 解析失败：{error}"})
+    except KeyError as error:
+        errors.append({"code": "epub_missing_file", "message": f"EPUB 缺少必要文件：{error}"})
+    summary["valid_for_local_open"] = not errors
+    return _epub_validation_result(errors, warnings, summary, details)
+
+
+def _epub_validation_result(errors: list[dict[str, str]], warnings: list[str], summary: dict[str, Any], details: dict[str, Any]) -> dict:
+    summary["error_count"] = len(errors)
+    summary["warning_count"] = len(warnings)
+    return {
+        "status": "error" if errors else ("warning" if warnings else "ok"),
+        "errors": errors,
+        "warnings": warnings,
+        "summary": summary,
+        "details": details,
+    }
+
+
+def _missing_manifest_items(manifest: dict[str, dict[str, str]], opf_path: str, names: set[str]) -> list[tuple[str, str, str]]:
+    opf_dir = posixpath.dirname(opf_path)
+    missing = []
+    for item_id, item in manifest.items():
+        href = item.get("href", "")
+        if not href:
+            continue
+        full_path = _norm_zip_path(posixpath.join(opf_dir, href))
+        if full_path not in names:
+            missing.append((item_id, href, full_path))
+    return missing
+
+
+def _validate_link_file(archive: zipfile.ZipFile, path: str, names: set[str], attr: str) -> dict[str, Any]:
+    if not path or path not in names:
+        return {"count": 0, "broken": [], "empty_anchors": 0}
+    data = archive.read(path).decode("utf-8", errors="replace")
+    values = _attribute_values(data, attr)
+    base = posixpath.dirname(path)
+    broken = []
+    for value in values:
+        if _external_or_fragment_link(value):
+            continue
+        target = _norm_zip_path(posixpath.join(base, _link_path(html.unescape(value))))
+        if target and target not in names:
+            broken.append((value, target))
+    empty_anchors = 0
+    if attr == "href":
+        empty_anchors = len(re.findall(r"<(?:\w+:)?a\b[^>]*href\s*=\s*['\"][^'\"]+['\"][^>]*/>", data, flags=re.I))
+        empty_anchors += len(re.findall(r"<(?:\w+:)?a\b[^>]*href\s*=\s*['\"][^'\"]+['\"][^>]*>\s*</(?:\w+:)?a>", data, flags=re.I | re.S))
+    return {"count": len(values), "broken": broken, "empty_anchors": empty_anchors}
+
+
+def _attribute_values(text: str, attr: str) -> list[str]:
+    return re.findall(r"\b" + re.escape(attr) + r"\s*=\s*['\"]([^'\"]+)['\"]", text, flags=re.I)
+
+
+def _external_or_fragment_link(value: str) -> bool:
+    lowered = value.lower()
+    return lowered.startswith(("#", "http:", "https:", "mailto:", "data:"))
+
+
+def _link_path(value: str) -> str:
+    return value.split("#", 1)[0].split("?", 1)[0]
+
+
+def _norm_zip_path(path: str) -> str:
+    return posixpath.normpath(path).replace("\\", "/")
 
 
 def _find_opf_path(archive: zipfile.ZipFile) -> str:

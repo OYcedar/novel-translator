@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -9,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.analysis import analyze_book as analyze_book_report, translation_plan as translation_plan_report
-from app.book_io import export_epub, export_txt, inspect_epub, load_source_book
+from app.book_io import export_epub, export_txt, inspect_epub, load_source_book, validate_epub
 from app.config import AppConfig, EpubConfig, load_config
 from app.context import context_status, load_context, summarize_context
 from app.delivery import export_epub_risk_report, package_delivery
@@ -83,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect_epub_parser = add_common(subparsers.add_parser("inspect-epub", help="检查 EPUB 内部结构"), json_flag=True)
     inspect_epub_parser.add_argument("--path", type=Path, required=True)
+
+    validate_epub_parser = add_common(subparsers.add_parser("validate-epub", help="校验 EPUB 阅读器兼容性"), json_flag=True)
+    validate_epub_parser.add_argument("--path", type=Path, required=True)
+
+    open_local_parser = add_common(subparsers.add_parser("open-local", help="用系统默认程序打开本地文件"), json_flag=True)
+    open_local_parser.add_argument("--path", type=Path, required=True)
 
     add_book = add_common(subparsers.add_parser("add-book", help="注册 EPUB/TXT 小说"), json_flag=True)
     add_book.add_argument("--path", type=Path, required=True)
@@ -331,6 +339,14 @@ def dispatch(args: argparse.Namespace) -> dict:
         except FileNotFoundError:
             epub_config = EpubConfig()
         return inspect_epub(args.path.expanduser().resolve(), epub_config)
+    if args.command == "validate-epub":
+        try:
+            epub_config = load_config(ROOT, args.config).epub
+        except FileNotFoundError:
+            epub_config = EpubConfig()
+        return validate_epub(args.path.expanduser().resolve(), epub_config)
+    if args.command == "open-local":
+        return open_local(args.path.expanduser().resolve())
     config = load_config(ROOT, args.config)
     config.books_dir.mkdir(parents=True, exist_ok=True)
     if args.command == "add-book":
@@ -472,6 +488,38 @@ def doctor(args: argparse.Namespace) -> dict:
             "example_exists": example_exists,
             "python": sys.version.split()[0],
         },
+        "details": {},
+    }
+
+
+def open_local(path: Path) -> dict:
+    if not path.exists():
+        return {
+            "status": "error",
+            "errors": [{"code": "file_not_found", "message": f"文件不存在：{path}"}],
+            "warnings": [],
+            "summary": {"path": str(path), "opened": False},
+            "details": {},
+        }
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception as error:
+        return {
+            "status": "error",
+            "errors": [{"code": type(error).__name__, "message": str(error)}],
+            "warnings": [],
+            "summary": {"path": str(path), "opened": False},
+            "details": {},
+        }
+    return {
+        "status": "ok",
+        "warnings": [],
+        "summary": {"path": str(path), "opened": True},
         "details": {},
     }
 
