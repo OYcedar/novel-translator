@@ -51,6 +51,14 @@ python3 main.py --agent-mode translate --book <书籍ID> --dry-run --json
 
 ## Agent 工作流建议
 
+项目内置了 Agent Skill：
+
+```text
+skills/novel-translator/SKILL.md
+```
+
+如果交给 Codex、Claude Code 或其他 Agent 执行整本翻译，让它读取这个 Skill，并按其中的命令契约完成术语、翻译、质量检查和导出流程。本仓库只提供 Skill 文件，不会自动安装到本机 Codex。
+
 1. `doctor --json` 检查配置。
 2. `add-book --path <小说文件> --json` 注册小说，记录返回的书籍 ID。
 3. `text-scope --book <书籍ID> --json` 确认章节和段落数量。
