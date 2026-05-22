@@ -276,6 +276,41 @@ def test_epub_export_writes_mimetype_first_and_uncompressed(tmp_path: Path) -> N
     assert infos[0].compress_type == zipfile.ZIP_STORED
 
 
+def test_epub_export_translates_opf_metadata(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub_with_metadata(epub)
+    book = load_epub_book(epub)
+    book.paragraphs[0].translated = "你好。"
+    book.metadata.setdefault("epub", {})["metadata_translations"] = {
+        "title": "中文书名",
+        "description": "中文简介。",
+        "language": "zh-CN",
+    }
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    export_epub(book, output)
+    with zipfile.ZipFile(output) as archive:
+        opf = archive.read("OEBPS/content.opf").decode("utf-8")
+    report = validate_epub(output)
+
+    assert "中文书名" in opf
+    assert "中文简介。" in opf
+    assert "zh-CN" in opf
+    assert report["summary"]["metadata_description_source_residual"] is False
+
+
+def test_validate_epub_warns_on_untranslated_opf_description(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub_with_metadata(epub)
+
+    report = validate_epub(epub)
+
+    assert report["status"] == "warning"
+    assert report["summary"]["metadata_description_source_residual"] is True
+    assert any("OPF 简介" in warning for warning in report["warnings"])
+
+
 def test_validate_epub_accepts_exported_local_open_package(tmp_path: Path) -> None:
     epub = tmp_path / "book.epub"
     _write_epub(epub, chapter_body="<body><p>Hello.</p></body>")
@@ -900,3 +935,35 @@ def _write_epub(
         )
         if "toc.ncx" in extra_manifest:
             archive.writestr("OEBPS/toc.ncx", "<ncx><navMap></navMap></ncx>")
+
+
+def _write_epub_with_metadata(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>日本語タイトル</dc:title>
+    <dc:language>ja</dc:language>
+    <dc:description>これは日本語の紹介文です。</dc:description>
+  </metadata>
+  <manifest><item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello.</p></body></html>""",
+        )

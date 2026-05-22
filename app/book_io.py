@@ -222,6 +222,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
         "nav_linear_spine_count": 0,
         "toc_broken_links": 0,
         "toc_prefixed_namespace": False,
+        "metadata_description_source_residual": False,
     }
     try:
         with zipfile.ZipFile(path) as archive:
@@ -253,6 +254,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                 return _epub_validation_result(errors, warnings, summary, details)
             opf = _read_xml(archive, opf_path)
             manifest = _opf_manifest_items(opf)
+            metadata_texts = _opf_metadata_texts(opf)
             all_spine_items = _spine_items(opf, opf_path, EpubConfig(include_non_linear_spine=True))
             spine_items = _spine_items(opf, opf_path, config)
             nav_path = _find_nav_path(manifest, opf_path)
@@ -284,6 +286,9 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                     "toc_link_count": toc_links["count"],
                     "toc_broken_links": len(toc_links["broken"]),
                     "toc_prefixed_namespace": toc_prefixed_namespace,
+                    "metadata_title": metadata_texts.get("title", ""),
+                    "metadata_language": metadata_texts.get("language", ""),
+                    "metadata_description_source_residual": _contains_japanese_kana(metadata_texts.get("description", "")),
                 }
             )
             if not nav_path:
@@ -304,6 +309,8 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                 errors.append({"code": "epub_toc_broken_link", "message": f"toc 链接不存在：{src} -> {target}"})
             if toc_prefixed_namespace:
                 errors.append({"code": "epub_toc_prefixed_namespace", "message": "toc.ncx 使用了带前缀的 ncx 根标签，部分 Android 阅读器会加载目录失败"})
+            if summary["metadata_description_source_residual"]:
+                warnings.append("OPF 简介中仍检测到日文假名，手机书籍详情页可能显示未翻译简介")
             details = {
                 "manifest_missing": manifest_missing,
                 "spine_missing": spine_missing,
@@ -344,6 +351,19 @@ def _missing_manifest_items(manifest: dict[str, dict[str, str]], opf_path: str, 
         if full_path not in names:
             missing.append((item_id, href, full_path))
     return missing
+
+
+def _opf_metadata_texts(opf: ET.Element) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for element in opf.iter():
+        local = _local_name(element.tag)
+        if local in {"title", "description", "language"}:
+            result[local] = _element_text(element)
+    return result
+
+
+def _contains_japanese_kana(text: str) -> bool:
+    return bool(re.search(r"[\u3040-\u30ff]", text))
 
 
 def _validate_link_file(archive: zipfile.ZipFile, path: str, names: set[str], attr: str) -> dict[str, Any]:
@@ -693,8 +713,8 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None,
             data = src.read(info.filename)
             is_nav = config.translate_nav and info.filename == nav_path
             is_toc = config.translate_toc and info.filename == toc_path
-            if info.filename == opf_path and nav_path:
-                data = _mark_nav_spine_non_linear(data)
+            if info.filename == opf_path:
+                data = _update_opf_for_export(data, book, title_translations)
             elif title_translations and (is_nav or is_toc):
                 data, nav_warnings = _replace_navigation_text(data, title_translations)
                 warnings.extend(f"{info.filename}: {message}" for message in nav_warnings)
@@ -707,25 +727,56 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None,
     return {"warnings": warnings, "warning_count": len(warnings)}
 
 
-def _mark_nav_spine_non_linear(data: bytes) -> bytes:
+def _update_opf_for_export(data: bytes, book: Book, title_translations: dict[str, str]) -> bytes:
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
         return data
+    changed = _replace_opf_metadata(root, book, title_translations)
     nav_ids = {
         item.attrib.get("id", "")
         for item in root.iter()
         if _local_name(item.tag) == "item" and "nav" in item.attrib.get("properties", "").split()
     }
     if not nav_ids:
-        return data
+        return _serialize_xml(root) if changed else data
+    changed = _mark_nav_spine_non_linear(root, nav_ids) or changed
+    return _serialize_xml(root) if changed else data
+
+
+def _replace_opf_metadata(root: ET.Element, book: Book, title_translations: dict[str, str]) -> bool:
+    metadata_translations = book.metadata.get("epub", {}).get("metadata_translations", {})
+    title = str(metadata_translations.get("title") or title_translations.get(book.title, "") or "").strip()
+    description = str(metadata_translations.get("description") or "").strip()
+    language = str(metadata_translations.get("language") or "").strip()
+    changed = False
+    for element in root.iter():
+        local = _local_name(element.tag)
+        if local == "title" and title:
+            changed = _set_plain_text_if_changed(element, title) or changed
+        elif local == "description" and description:
+            changed = _set_plain_text_if_changed(element, description) or changed
+        elif local == "language" and language:
+            changed = _set_plain_text_if_changed(element, language) or changed
+    return changed
+
+
+def _mark_nav_spine_non_linear(root: ET.Element, nav_ids: set[str]) -> bool:
     changed = False
     for itemref in root.iter():
         if _local_name(itemref.tag) == "itemref" and itemref.attrib.get("idref", "") in nav_ids:
             if itemref.attrib.get("linear") != "no":
                 itemref.set("linear", "no")
                 changed = True
-    return _serialize_xml(root) if changed else data
+    return changed
+
+
+def _set_plain_text_if_changed(element: ET.Element, value: str) -> bool:
+    if _element_text(element) == value and not list(element):
+        return False
+    element.clear()
+    element.text = value
+    return True
 
 
 def _write_epub_member(dst: zipfile.ZipFile, info: zipfile.ZipInfo, data: bytes, *, force_stored: bool = False) -> None:
