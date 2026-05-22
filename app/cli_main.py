@@ -5,8 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-from app.book_io import export_epub, export_txt, load_source_book
-from app.config import AppConfig, load_config
+from app.book_io import export_epub, export_txt, inspect_epub, load_source_book
+from app.config import AppConfig, EpubConfig, load_config
 from app.feedback import verify_feedback_text
 from app.manual import (
     audit_coverage_report,
@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
+
+    inspect_epub_parser = add_common(subparsers.add_parser("inspect-epub", help="检查 EPUB 内部结构"), json_flag=True)
+    inspect_epub_parser.add_argument("--path", type=Path, required=True)
 
     add_book = add_common(subparsers.add_parser("add-book", help="注册 EPUB/TXT 小说"), json_flag=True)
     add_book.add_argument("--path", type=Path, required=True)
@@ -152,6 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--format", choices=["txt", "epub"], required=True)
     export.add_argument("--output", type=Path, required=True)
     export.add_argument("--bilingual", action="store_true")
+
+    validate_export_parser = add_common(subparsers.add_parser("validate-export", help="导出前检查"), json_flag=True)
+    validate_export_parser.add_argument("--book", required=True)
+    validate_export_parser.add_argument("--format", choices=["txt", "epub"], required=True)
     return parser
 
 
@@ -164,6 +171,12 @@ def add_common(parser: argparse.ArgumentParser, *, json_flag: bool) -> argparse.
 def dispatch(args: argparse.Namespace) -> dict:
     if args.command == "doctor":
         return doctor(args)
+    if args.command == "inspect-epub":
+        try:
+            epub_config = load_config(ROOT, args.config).epub
+        except FileNotFoundError:
+            epub_config = EpubConfig()
+        return inspect_epub(args.path.expanduser().resolve(), epub_config)
     config = load_config(ROOT, args.config)
     config.books_dir.mkdir(parents=True, exist_ok=True)
     if args.command == "add-book":
@@ -222,6 +235,8 @@ def dispatch(args: argparse.Namespace) -> dict:
         return verify_feedback_text(book, args.input.expanduser().resolve())
     if args.command == "export":
         return export_book(config, args)
+    if args.command == "validate-export":
+        return validate_export(config, args)
     raise ValueError(f"未知命令：{args.command}")
 
 
@@ -245,21 +260,34 @@ def add_book(config: AppConfig, args: argparse.Namespace) -> dict:
     source_path = args.path.expanduser().resolve()
     if not source_path.exists():
         raise FileNotFoundError(f"文件不存在：{source_path}")
-    book = load_source_book(source_path, title=args.title)
+    book = load_source_book(source_path, title=args.title, epub_config=config.epub)
     if args.id:
         book.id = slugify(args.id)
     target_dir = save_book(config.books_dir, book, source_path)
+    summary = {
+        "book": book.id,
+        "title": book.title,
+        "type": book.source_type,
+        "chapters": len(book.chapters),
+        "paragraphs": len(book.paragraphs),
+        "data_dir": str(target_dir),
+    }
+    warnings = []
+    if book.source_type == "epub":
+        epub_meta = book.metadata.get("epub", {})
+        summary.update(
+            {
+                "parser_mode": epub_meta.get("parser_mode", ""),
+                "nav_path": epub_meta.get("nav_path", ""),
+                "toc_path": epub_meta.get("toc_path", ""),
+                "warning_count": epub_meta.get("warning_count", 0),
+            }
+        )
+        warnings = list(epub_meta.get("warnings", []))
     return {
-        "status": "ok",
-        "warnings": [],
-        "summary": {
-            "book": book.id,
-            "title": book.title,
-            "type": book.source_type,
-            "chapters": len(book.chapters),
-            "paragraphs": len(book.paragraphs),
-            "data_dir": str(target_dir),
-        },
+        "status": "warning" if warnings else "ok",
+        "warnings": warnings,
+        "summary": summary,
         "details": {},
     }
 
@@ -420,15 +448,48 @@ def export_book(config: AppConfig, args: argparse.Namespace) -> dict:
     output = args.output.expanduser().resolve()
     if args.format == "txt":
         export_txt(book, output, bilingual=args.bilingual)
+        warnings = []
     elif args.format == "epub":
-        export_epub(book, output)
+        result = export_epub(book, output, config.epub)
+        warnings = result["warnings"]
     else:
         raise ValueError(f"不支持导出格式：{args.format}")
     return {
-        "status": "ok",
-        "warnings": [],
-        "summary": {"book": book.id, "output": str(output), "format": args.format},
+        "status": "ok" if not warnings else "warning",
+        "warnings": warnings,
+        "summary": {"book": book.id, "output": str(output), "format": args.format, "warning_count": len(warnings)},
         "details": {},
+    }
+
+
+def validate_export(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    terms = load_terms(config.books_dir, book.id)
+    quality = quality_report(book, config.quality, terms)
+    errors = []
+    warnings = []
+    pending = quality["summary"].get("untranslated", 0)
+    if pending:
+        errors.append({"code": "export_pending_translations", "message": f"还有 {pending} 个段落未翻译"})
+    if args.format == "epub" and book.source_type != "epub":
+        errors.append({"code": "export_format_invalid", "message": "TXT 注册书籍不能导出 EPUB"})
+    if args.format == "epub":
+        risk_count = quality["summary"].get("epub_markup_risk", 0)
+        if risk_count:
+            warnings.append(f"存在 {risk_count} 个 EPUB 标记风险段落，导出后需要人工复核")
+    status = "error" if errors else ("warning" if warnings or quality["status"] != "ok" else "ok")
+    return {
+        "status": status,
+        "errors": errors,
+        "warnings": warnings,
+        "summary": {
+            "book": book.id,
+            "format": args.format,
+            "quality_status": quality["status"],
+            "pending": pending,
+            "epub_markup_risk": quality["summary"].get("epub_markup_risk", 0),
+        },
+        "details": {"quality": quality},
     }
 
 

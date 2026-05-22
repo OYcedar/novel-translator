@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import zipfile
 
-from app.book_io import export_txt, load_epub_book, load_txt_book
+from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book
 from app.feedback import verify_feedback_text
 from app.manual import export_pending_translations, import_manual_translations, reset_translations
 from app.models import Paragraph, save_book
@@ -73,6 +73,63 @@ def test_load_epub_book_reads_spine_xhtml(tmp_path: Path) -> None:
     assert book.source_type == "epub"
     assert len(book.chapters) == 1
     assert [item.source for item in book.paragraphs] == ["第一章", "她推开门。", "风从走廊尽头吹来。"]
+    assert book.paragraphs[0].metadata["epub"]["chapter_path"] == "OEBPS/chapter1.xhtml"
+    assert book.paragraphs[0].metadata["epub"]["node_index"] == 0
+
+
+def test_inspect_epub_reports_nav_toc_and_risks(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub(
+        epub,
+        chapter_name="chapter1.html",
+        chapter_body='<body><nav><ol><li><a href="chapter1.html">第一章</a></li></ol></nav><p><ruby>漢<rt>かん</rt></ruby><a href="#n1">注</a></p></body>',
+        extra_manifest='<item id="nav" href="chapter1.html" media-type="application/xhtml+xml" properties="nav"/><item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
+        spine_attrs=' toc="toc"',
+    )
+
+    report = inspect_epub(epub)
+
+    assert report["summary"]["has_nav"] is True
+    assert report["summary"]["has_toc"] is True
+    assert report["summary"]["html_file_count"] >= 1
+    assert report["summary"]["ruby_count"] == 1
+    assert report["summary"]["link_count"] >= 1
+
+
+def test_epub_export_uses_node_locator_for_duplicate_text(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub(epub, chapter_body="<body><p>Repeat.</p><p>Repeat.</p></body>")
+    book = load_epub_book(epub)
+    book.paragraphs[0].translated = "第一个。"
+    book.paragraphs[1].translated = "第二个。"
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    result = export_epub(book, output)
+    with zipfile.ZipFile(output) as archive:
+        xhtml = archive.read("OEBPS/chapter1.xhtml").decode("utf-8")
+
+    assert result["warning_count"] == 0
+    assert "第一个。" in xhtml
+    assert "第二个。" in xhtml
+    assert xhtml.index("第一个。") < xhtml.index("第二个。")
+
+
+def test_epub_export_preserves_outer_attributes(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub(epub, chapter_body='<body><p id="p1" class="lead">Hello.</p></body>')
+    book = load_epub_book(epub)
+    book.paragraphs[0].translated = "你好。"
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    export_epub(book, output)
+    with zipfile.ZipFile(output) as archive:
+        xhtml = archive.read("OEBPS/chapter1.xhtml").decode("utf-8")
+
+    assert 'id="p1"' in xhtml
+    assert 'class="lead"' in xhtml
+    assert "你好。" in xhtml
 
 
 def test_extract_term_candidates_counts_repeated_names(tmp_path: Path) -> None:
@@ -197,3 +254,40 @@ def _quality_config():
     from app.config import QualityConfig
 
     return QualityConfig(source_residual_patterns=())
+
+
+def _write_epub(
+    path: Path,
+    *,
+    chapter_name: str = "chapter1.xhtml",
+    chapter_body: str,
+    extra_manifest: str = "",
+    spine_attrs: str = "",
+) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            f"""<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书</dc:title></metadata>
+  <manifest><item id="c1" href="{chapter_name}" media-type="application/xhtml+xml"/>{extra_manifest}</manifest>
+  <spine{spine_attrs}><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            f"OEBPS/{chapter_name}",
+            f"""<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">{chapter_body}</html>""",
+        )
+        if "toc.ncx" in extra_manifest:
+            archive.writestr("OEBPS/toc.ncx", "<ncx><navMap></navMap></ncx>")

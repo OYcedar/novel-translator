@@ -15,6 +15,7 @@ class Paragraph:
     index: int
     source: str
     translated: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -33,6 +34,7 @@ class Book:
     source_type: str
     source_file: str
     chapters: list[Chapter] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def paragraphs(self) -> list[Paragraph]:
@@ -80,6 +82,7 @@ def book_from_dict(raw: dict[str, Any]) -> Book:
                 index=int(item["index"]),
                 source=str(item["source"]),
                 translated=str(item.get("translated", "")),
+                metadata=dict(item.get("metadata", {})),
             )
             for item in chapter_raw.get("paragraphs", [])
         ]
@@ -98,6 +101,7 @@ def book_from_dict(raw: dict[str, Any]) -> Book:
         source_type=str(raw["source_type"]),
         source_file=str(raw.get("source_file", "")),
         chapters=chapters,
+        metadata=dict(raw.get("metadata", {})),
     )
 
 
@@ -108,4 +112,3 @@ def persist_book(root_books_dir: Path, book: Book) -> None:
         json.dumps(asdict(book), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-

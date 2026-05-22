@@ -18,3 +18,9 @@ source_residual_patterns = [
   "[A-Za-z]{24,}",
 ]
 
+[epub]
+parser = "auto"
+include_non_linear_spine = false
+preserve_outer_markup = true
+warn_on_ruby = true
+warn_on_duplicate_source = true

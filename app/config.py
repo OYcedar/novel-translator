@@ -34,11 +34,21 @@ class QualityConfig:
 
 
 @dataclass(frozen=True)
+class EpubConfig:
+    parser: str = "auto"
+    include_non_linear_spine: bool = False
+    preserve_outer_markup: bool = True
+    warn_on_ruby: bool = True
+    warn_on_duplicate_source: bool = True
+
+
+@dataclass(frozen=True)
 class AppConfig:
     root: Path
     llm: LlmConfig
     translation: TranslationConfig
     quality: QualityConfig
+    epub: EpubConfig
 
     @property
     def data_dir(self) -> Path:
@@ -65,6 +75,7 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     llm_raw = raw.get("llm", {})
     translation_raw = raw.get("translation", {})
     quality_raw = raw.get("quality", {})
+    epub_raw = raw.get("epub", {})
     llm = LlmConfig(
         base_url=str(llm_raw.get("base_url", "")).rstrip("/"),
         api_key=str(llm_raw.get("api_key", "")),
@@ -84,7 +95,14 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     quality = QualityConfig(
         source_residual_patterns=tuple(str(item) for item in quality_raw.get("source_residual_patterns", []))
     )
-    return AppConfig(root=root, llm=llm, translation=translation, quality=quality)
+    epub = EpubConfig(
+        parser=str(epub_raw.get("parser", "auto")),
+        include_non_linear_spine=bool(epub_raw.get("include_non_linear_spine", False)),
+        preserve_outer_markup=bool(epub_raw.get("preserve_outer_markup", True)),
+        warn_on_ruby=bool(epub_raw.get("warn_on_ruby", True)),
+        warn_on_duplicate_source=bool(epub_raw.get("warn_on_duplicate_source", True)),
+    )
+    return AppConfig(root=root, llm=llm, translation=translation, quality=quality, epub=epub)
 
 
 def load_toml(path: Path) -> dict:
@@ -128,6 +146,9 @@ def parse_simple_toml(text: str) -> dict:
         if value == "[":
             pending_key = key
             pending_value_lines = [value]
+            continue
+        if value.lower() in {"true", "false"}:
+            current[key] = value.lower() == "true"
             continue
         try:
             current[key] = ast.literal_eval(value)

@@ -30,6 +30,7 @@ timeout = 600
 
 ```bash
 python3 main.py --agent-mode doctor --json
+python3 main.py --agent-mode inspect-epub --path ./novel.epub --json
 python3 main.py --agent-mode add-book --path ./novel.epub --json
 python3 main.py --agent-mode list --json
 python3 main.py --agent-mode text-scope --book <书籍ID> --json
@@ -47,6 +48,7 @@ python3 main.py --agent-mode export-quality-fix --book <书籍ID> --output ./qua
 python3 main.py --agent-mode import-manual-translations --book <书籍ID> --input ./manual.json --json
 python3 main.py --agent-mode reset-translations --book <书籍ID> --input ./reset.json --json
 python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input ./feedback.txt --json
+python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json
 python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json
 python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json
 ```
@@ -150,4 +152,29 @@ workspace/
 
 ## EPUB 说明
 
-EPUB 导出会复制原始 EPUB，并替换 spine 中 XHTML 章节里的段落文本。复杂排版、脚注、图片文字和被拆成多个内联节点的段落可能需要人工复核；稳妥交付时建议同时导出 TXT 做阅读校验。
+EPUB 导入会读取 OPF manifest/spine，支持 EPUB2 `toc.ncx`、EPUB3 `nav.xhtml`、`.xhtml`、`.html` 和 `.htm` 章节。导入时会为每个可翻译节点保存 `chapter_path`、`node_index`、`node_tag`、`node_id`、`node_class` 和 `text_hash`，导出时按节点定位回写，重复原文也能写回正确位置。
+
+可先检查 EPUB 内部结构：
+
+```bash
+python3 main.py --agent-mode inspect-epub --path ./novel.epub --json
+```
+
+默认使用标准库解析；如果本机安装了可选依赖 `beautifulsoup4` / `lxml`，遇到坏 HTML 或非严格 XHTML 时会自动启用增强解析。可选安装：
+
+```bash
+python3 -m pip install ".[epub]"
+```
+
+配置项：
+
+```toml
+[epub]
+parser = "auto"
+include_non_linear_spine = false
+preserve_outer_markup = true
+warn_on_ruby = true
+warn_on_duplicate_source = true
+```
+
+EPUB 导出会复制原始 EPUB，保留 CSS、图片和元数据，并替换 spine 章节中的译文节点。`ruby`、脚注链接、表格、代码块、图片文字等复杂结构会在 `quality-report` 的 `epub_markup_risk` 中提示；最终发布前建议运行 `validate-export`，并抽查 EPUB 阅读器效果。

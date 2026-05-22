@@ -19,6 +19,7 @@ python3 main.py --agent-mode <命令> ...
 | 命令 | 用途 | 成功判断 | 失败处理 |
 | --- | --- | --- | --- |
 | `doctor --json` | 检查项目根目录、配置文件和 Python 版本 | `status` 不是 `error` | 缺 `setting.toml` 时复制示例并填写；仅 dry-run 可继续 |
+| `inspect-epub --path <EPUB文件> --json` | 检查 EPUB2/3、OPF、spine、nav/toc、重复文本和标记风险 | `summary.paragraph_count` 可解释 | 坏 HTML 且增强依赖不可用时，安装可选 EPUB 依赖或换源文件 |
 | `add-book --path <小说文件> --json` | 注册 EPUB/TXT 小说 | `summary.book` 可用于后续命令 | 修路径或格式后重跑 |
 | `add-book --path <小说文件> --title <标题> --id <ID> --json` | 用指定标题和 ID 注册小说 | `summary.book` 等于规范化 ID | ID 冲突时确认是否覆盖当前本地缓存 |
 | `list --json` | 列出已注册小说 | `details.books` 可读 | 未注册时先 `add-book` |
@@ -70,3 +71,6 @@ python3 main.py --agent-mode <命令> ...
 | `export --book <书籍ID> --format txt --output <文件> --json` | 导出 TXT 译本 | 输出文件存在 | 路径不可写时换输出路径 |
 | `export --book <书籍ID> --format txt --output <文件> --bilingual --json` | 导出双语 TXT | 输出文件包含原文和译文 | 仅用于校对，不一定适合发布 |
 | `export --book <书籍ID> --format epub --output <文件> --json` | 导出 EPUB 译本 | 源书为 EPUB 且输出文件存在 | TXT 书不能导出 EPUB；复杂排版需人工复核 |
+| `validate-export --book <书籍ID> --format txt|epub --json` | 导出前检查 pending、质量和 EPUB 标记风险 | 最终交付前应为 `ok` | warning 需要解释；error 必须修复 |
+
+EPUB 导出按导入时保存的 `chapter_path`、`node_index` 和 `text_hash` 回写。遇到节点失效或 hash 不一致时，导出会 warning 并保留原文，不能把这类输出称为最终版。
