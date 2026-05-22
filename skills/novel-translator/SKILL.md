@@ -14,6 +14,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 - `<小说文件>` 只支持 `.epub` 和 `.txt`。
 - `<书籍ID>` 来自 `add-book --json` 的 `summary.book`。
 - `<工作区>` 是临时目录，用于放术语候选、上下文和人工修复文件；不要把临时文件散落到项目根目录。
+- `<工作记录目录>` 是单本小说的过程收纳目录，默认位于 `../workspace/books/<书籍ID>/`，包含 `logs/`、`reports/`、`workspace/`、`imports/` 和 `delivery/`。核心翻译状态仍以 `data/books/<书籍ID>/` 为准；工作记录目录用于收纳后台脚本、日志、外部术语表、质检报告、审校材料和交付包。
 - 模型地址、API Key 和模型名只从 `setting.toml`、环境或用户本地配置读取；不要写进任务文件、报告、提交或聊天总结。
 - 所有 JSON、TXT、EPUB 相关临时文件按 UTF-8 处理。
 - `--json` 命令的 stdout 才是机器结果；不要把日志或进度文本当 JSON 解析。
@@ -33,22 +34,23 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 1. 在 `<项目目录>` 运行 `doctor --json`，确认 CLI 和配置状态。缺 `setting.toml` 时先让用户复制 `setting.example.toml` 并填写模型配置；只做 `--dry-run` 验证时可继续。
 2. 如果源文件是 EPUB，先运行 `inspect-epub --path <小说文件> --json`，查看 spine、nav/toc、重复文本和标记风险。
 3. 运行 `add-book --path <小说文件> --json` 注册小说，记录 `<书籍ID>`。
-4. 运行 `text-scope --book <书籍ID> --json`，确认章节数和段落数合理。
-5. 运行 `analyze-book --book <书籍ID> --json` 生成译前项目画像，再运行 `translation-plan --book <书籍ID> --json` 获取执行建议。
-6. 运行 `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
-7. 阅读 `terminology-workflow.md`，填写或审查 `<工作区>/terminology/glossary.json`。删除误判候选，补全人名、地名、组织名、能力名等稳定译名。
-8. 运行 `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。
-9. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
-10. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
-11. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
-12. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
-13. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
-14. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
-15. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
-16. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
-17. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
-18. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
-19. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`，并优先用 `package-delivery --book <书籍ID> --output-dir <目录> --json` 生成交付包。
+4. 运行 `work-records --book <书籍ID> --json` 初始化 `<工作记录目录>`。如果已有外部脚本、日志、术语表或人工文件，使用 `work-records --book <书籍ID> --collect-log-dir <日志目录> --json` 和 `work-records --book <书籍ID> --collect-file <文件> --json` 收纳到该书目录；后续报告优先输出到 `<工作记录目录>/reports/`，交付包优先输出到 `<工作记录目录>/delivery/`。
+5. 运行 `text-scope --book <书籍ID> --json`，确认章节数和段落数合理。
+6. 运行 `analyze-book --book <书籍ID> --json` 生成译前项目画像，再运行 `translation-plan --book <书籍ID> --json` 获取执行建议。
+7. 运行 `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
+8. 阅读 `terminology-workflow.md`，填写或审查 `<工作区>/terminology/glossary.json`。删除误判候选，补全人名、地名、组织名、能力名等稳定译名。
+9. 运行 `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。导入用的外部术语文件也应通过 `work-records --collect-file` 复制到 `<工作记录目录>/imports/`。
+10. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
+11. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
+12. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
+13. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
+14. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
+15. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
+16. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
+17. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
+18. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
+19. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
+20. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`，并优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --json` 生成交付包。
 
 ## 硬门槛
 
@@ -64,6 +66,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 - `--dry-run` 只能用于流程验证，不代表翻译完成。
 - EPUB 导出是复制原 EPUB 并替换 spine XHTML 段落文本；复杂脚注、内联富文本、图片文字和特殊排版必须提醒用户复核。
 - EPUB 回写依赖导入时保存的节点定位；`validate-export` 或 `export` 出现节点定位/hash warning 时，必须说明相关段落已保留原文或需要人工复核。
+- 一部小说对应一个 `<工作记录目录>`；不要把后台脚本、运行日志、外部术语表、质量报告和交付包长期散落在项目根目录或全局日志目录。正在运行的日志可以先复制收纳，不要移动以免打断进程。
 - 不要直接编辑私钥、API Key、`setting.toml` 或用户小说源文件。
 
 ## 禁止做法
