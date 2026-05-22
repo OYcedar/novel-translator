@@ -58,7 +58,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 18. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
 19. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
 20. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json`，并优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --json` 生成交付包。
-21. EPUB 成品交付后运行 `validate-epub --path <成品.epub> --json`，确认 `valid_for_local_open=true`、`nav_broken_links=0`、`nav_empty_anchors=0`、`spine_missing=0`、`mimetype_first=true`、`mimetype_uncompressed=true`。通过后可用 `open-local --path <成品.epub> --json` 调起本机默认阅读器验证。
+21. EPUB 成品交付后运行 `validate-epub --path <成品.epub> --json`，确认 `valid_for_local_open=true`、`nav_broken_links=0`、`nav_empty_anchors=0`、`spine_missing=0`、`mimetype_first=true`、`mimetype_uncompressed=true`。通过后运行 `open-local --path <成品.epub> --json` 调起本机默认阅读器，确认阅读器窗口能打开、左侧目录能加载、首页或目录页能正常显示。
 
 ## 硬门槛
 
@@ -66,7 +66,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
 - `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
 - 交付前 `run-report.summary.failed` 必须为 0，`validate-export` 不能是 `error`。
-- EPUB 成品交付前 `validate-epub` 不能是 `error`；目录/nav/toc 断链、空目录锚点、spine 缺失、mimetype 非首项或被压缩都必须先修复或明确说明。
+- EPUB 成品交付前 `validate-epub` 不能是 `error`；目录/nav/toc 断链、空目录锚点、spine 缺失、mimetype 非首项或被压缩都必须先修复或明确说明。通过机器校验后还要用 `open-local` 做一次本机阅读器实开验证；能看到目录和页面内容才算 EPUB 打开测试通过。
 - EPUB 有 `epub_markup_risk` 时，交付包必须包含 `export-epub-risk-report` 生成的风险报告。
 - 审校建议不能自动覆盖译文；只有 `approved_translation` 通过 `apply-review-fixes` 验证后才算应用。
 - 长篇小说建议先生成章节上下文；`context-status` 缺摘要时，只能小批量试翻或向用户说明风险。
