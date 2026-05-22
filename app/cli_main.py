@@ -45,6 +45,7 @@ from app.terminology import (
     term_from_dict,
     validate_terms,
 )
+from app.task_control import clear_stop, request_stop, stop_requested, task_status
 from app.translator import make_batches, pending_paragraphs, translate_batch, validate_llm_response
 from app.work_records import collect_external_logs, collect_files, init_work_records
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
@@ -223,6 +224,16 @@ def build_parser() -> argparse.ArgumentParser:
     retry_parser.add_argument("--run-id")
     retry_parser.add_argument("--dry-run", action="store_true")
 
+    request_stop_parser = add_common(subparsers.add_parser("request-stop", help="请求运行中的翻译任务优雅停止"), json_flag=True)
+    request_stop_parser.add_argument("--book", required=True)
+    request_stop_parser.add_argument("--reason", default="")
+
+    clear_stop_parser = add_common(subparsers.add_parser("clear-stop", help="清除翻译停止请求"), json_flag=True)
+    clear_stop_parser.add_argument("--book", required=True)
+
+    task_status_parser = add_common(subparsers.add_parser("task-status", help="查看翻译任务控制状态"), json_flag=True)
+    task_status_parser.add_argument("--book", required=True)
+
     records_parser = add_common(subparsers.add_parser("work-records", help="初始化或收纳单本小说的工作记录"), json_flag=True)
     records_parser.add_argument("--book", required=True)
     records_parser.add_argument("--collect-log-dir", type=Path, help="复制外部日志目录中的翻译脚本和日志")
@@ -396,11 +407,19 @@ def dispatch(args: argparse.Namespace) -> dict:
         book = load_book(config.books_dir, args.book)
         return context_status(config.books_dir, book)
     if args.command == "run-report":
-        return run_report(config.books_dir, args.book)
+        book = load_book(config.books_dir, args.book)
+        return run_report(config.books_dir, args.book, _pending_id_set(book))
     if args.command == "failed-batches":
-        return failed_batches(config.books_dir, args.book)
+        book = load_book(config.books_dir, args.book)
+        return failed_batches(config.books_dir, args.book, _pending_id_set(book))
     if args.command == "retry-failed":
         return retry_failed(config, args)
+    if args.command == "request-stop":
+        return request_stop(config.books_dir, args.book, args.reason)
+    if args.command == "clear-stop":
+        return clear_stop(config.books_dir, args.book)
+    if args.command == "task-status":
+        return task_status(config.books_dir, args.book)
     if args.command == "work-records":
         return work_records(config, args)
     if args.command == "analyze-book":
@@ -577,13 +596,35 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
     batch_succeeded = 0
     batch_failed = 0
     batch_warnings = []
+    stopped = False
+    if stop_requested(config.books_dir, book.id):
+        return _translate_result(
+            book,
+            run_id,
+            batches,
+            batch_succeeded,
+            batch_failed,
+            batch_warnings,
+            reused_memory,
+            saved_translations,
+            target_ids,
+            workers,
+            rpm,
+            tpm,
+            stopped=True,
+        )
     if workers > 1 and len(batches) > 1 and not getattr(args, "dry_run", False) and not stop_on_warning:
         completed = []
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {}
             for index, batch in enumerate(batches, start=1):
+                if stop_requested(config.books_dir, book.id):
+                    stopped = True
+                    break
                 if index > 1:
-                    time.sleep(_rate_limit_delay(batch, rpm, tpm))
+                    if _sleep_with_stop(config.books_dir, book.id, _rate_limit_delay(batch, rpm, tpm)):
+                        stopped = True
+                        break
                 batch_id = f"{run_id}-b{index:04d}"
                 started = time.time()
                 future = executor.submit(_translate_one_batch, config, batch, terms, book, context, False)
@@ -645,29 +686,29 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
             )
         persist_book(config.books_dir, book)
         save_memory(config.books_dir, book.id, memory_entries)
-        return {
-            "status": "ok" if not batch_failed else "warning",
-            "warnings": batch_warnings,
-            "summary": {
-                "book": book.id,
-                "run_id": run_id,
-                "batches": len(batches),
-                "batch_succeeded": batch_succeeded,
-                "batch_failed": batch_failed,
-                "reused_memory": reused_memory,
-                "saved_translations": saved_translations,
-                "translated": saved_translations,
-                "pending": len(pending_paragraphs(book.paragraphs)),
-                "targeted": len(target_ids),
-                "workers": workers,
-                "rpm": rpm,
-                "tpm": tpm,
-            },
-            "details": {},
-        }
+        return _translate_result(
+            book,
+            run_id,
+            batches,
+            batch_succeeded,
+            batch_failed,
+            batch_warnings,
+            reused_memory,
+            saved_translations,
+            target_ids,
+            workers,
+            rpm,
+            tpm,
+            stopped=stopped,
+        )
     for index, batch in enumerate(batches, start=1):
+        if stop_requested(config.books_dir, book.id):
+            stopped = True
+            break
         if index > 1 and not getattr(args, "dry_run", False):
-            time.sleep(_rate_limit_delay(batch, rpm, tpm))
+            if _sleep_with_stop(config.books_dir, book.id, _rate_limit_delay(batch, rpm, tpm)):
+                stopped = True
+                break
         batch_id = f"{run_id}-b{index:04d}"
         started = time.time()
         result: dict[str, str] = {}
@@ -729,26 +770,21 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
             save_memory(config.books_dir, book.id, memory_entries)
         if warnings and stop_on_warning:
             break
-    return {
-        "status": "ok" if not batch_failed else "warning",
-        "warnings": batch_warnings,
-        "summary": {
-            "book": book.id,
-            "run_id": run_id,
-            "batches": len(batches),
-            "batch_succeeded": batch_succeeded,
-            "batch_failed": batch_failed,
-            "reused_memory": reused_memory,
-            "saved_translations": saved_translations,
-            "translated": saved_translations,
-            "pending": len(pending_paragraphs(book.paragraphs)),
-            "targeted": len(target_ids),
-            "workers": workers,
-            "rpm": rpm,
-            "tpm": tpm,
-        },
-        "details": {},
-    }
+    return _translate_result(
+        book,
+        run_id,
+        batches,
+        batch_succeeded,
+        batch_failed,
+        batch_warnings,
+        reused_memory,
+        saved_translations,
+        target_ids,
+        workers,
+        rpm,
+        tpm,
+        stopped=stopped,
+    )
 
 
 def run_folder(config: AppConfig, args: argparse.Namespace) -> dict:
@@ -850,6 +886,58 @@ def run_folder(config: AppConfig, args: argparse.Namespace) -> dict:
     }
 
 
+def _translate_result(
+    book,
+    run_id: str,
+    batches: list[list],
+    batch_succeeded: int,
+    batch_failed: int,
+    batch_warnings: list[str],
+    reused_memory: int,
+    saved_translations: int,
+    target_ids: set[str],
+    workers: int,
+    rpm: int,
+    tpm: int,
+    *,
+    stopped: bool,
+) -> dict:
+    warnings = list(batch_warnings)
+    if stopped:
+        warnings.append("收到停止请求，已在安全边界保存进度并退出。")
+    status = "warning" if stopped or batch_failed else "ok"
+    return {
+        "status": status,
+        "warnings": warnings,
+        "summary": {
+            "book": book.id,
+            "run_id": run_id,
+            "batches": len(batches),
+            "batch_succeeded": batch_succeeded,
+            "batch_failed": batch_failed,
+            "reused_memory": reused_memory,
+            "saved_translations": saved_translations,
+            "translated": saved_translations,
+            "pending": len(pending_paragraphs(book.paragraphs)),
+            "targeted": len(target_ids),
+            "workers": workers,
+            "rpm": rpm,
+            "tpm": tpm,
+            "stopped": stopped,
+        },
+        "details": {},
+    }
+
+
+def _sleep_with_stop(root_books_dir: Path, book_id: str, seconds: float) -> bool:
+    deadline = time.time() + max(0, seconds)
+    while time.time() < deadline:
+        if stop_requested(root_books_dir, book_id):
+            return True
+        time.sleep(min(1, deadline - time.time()))
+    return stop_requested(root_books_dir, book_id)
+
+
 def repair_translations(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
     terms = load_terms(config.books_dir, book.id)
@@ -908,9 +996,21 @@ def _quality_target_ids(quality: dict) -> set[str]:
 
 def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
-    ids = latest_failed_paragraph_ids(config.books_dir, book.id)
+    ids = latest_failed_paragraph_ids(config.books_dir, book.id, _pending_id_set(book))
     if not ids:
         return {"status": "ok", "warnings": [], "summary": {"book": book.id, "retried": 0, "pending": len(pending_paragraphs(book.paragraphs))}, "details": {}}
+    if args.dry_run:
+        return {
+            "status": "ok",
+            "warnings": [],
+            "summary": {
+                "book": book.id,
+                "retried": len(ids),
+                "pending": len(pending_paragraphs(book.paragraphs)),
+                "dry_run": True,
+            },
+            "details": {"target_ids": ids},
+        }
     targets = set(ids)
     for paragraph in book.paragraphs:
         if paragraph.id in targets:
@@ -931,6 +1031,10 @@ def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
     report = translate(config, retry_args)
     report["summary"]["retried_ids"] = ids
     return report
+
+
+def _pending_id_set(book) -> set[str]:
+    return {paragraph.id for paragraph in pending_paragraphs(book.paragraphs)}
 
 
 def work_records(config: AppConfig, args: argparse.Namespace) -> dict:

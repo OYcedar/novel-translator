@@ -41,10 +41,12 @@ def record_batch(root_books_dir: Path, book_id: str, run_id: str, batch: dict) -
     save_run(root_books_dir, book_id, run)
 
 
-def run_report(root_books_dir: Path, book_id: str) -> dict:
+def run_report(root_books_dir: Path, book_id: str, pending_ids: set[str] | None = None) -> dict:
     runs = _load_all_runs(root_books_dir, book_id)
     batches = [batch for run in runs for batch in run.get("batches", [])]
-    failed = [batch for batch in batches if batch.get("status") == "failed"]
+    historical_failed = [batch for batch in batches if batch.get("status") == "failed"]
+    failed = [_filter_failed_batch(batch, pending_ids) for batch in historical_failed]
+    failed = [batch for batch in failed if batch is not None]
     succeeded = [batch for batch in batches if batch.get("status") == "succeeded"]
     input_chars = sum(int(batch.get("input_chars", 0) or 0) for batch in batches)
     output_chars = sum(int(batch.get("output_chars", 0) or 0) for batch in batches)
@@ -59,6 +61,7 @@ def run_report(root_books_dir: Path, book_id: str) -> dict:
             "batches": len(batches),
             "succeeded": len(succeeded),
             "failed": len(failed),
+            "historical_failed": len(historical_failed),
             "input_chars": input_chars,
             "output_chars": output_chars,
             "memory_hits": memory_hits,
@@ -70,13 +73,15 @@ def run_report(root_books_dir: Path, book_id: str) -> dict:
     }
 
 
-def failed_batches(root_books_dir: Path, book_id: str) -> dict:
+def failed_batches(root_books_dir: Path, book_id: str, pending_ids: set[str] | None = None) -> dict:
     runs = _load_all_runs(root_books_dir, book_id)
     failed = []
     for run in runs:
         for batch in run.get("batches", []):
             if batch.get("status") == "failed":
-                failed.append({**batch, "run_id": run.get("run_id")})
+                filtered = _filter_failed_batch({**batch, "run_id": run.get("run_id")}, pending_ids)
+                if filtered is not None:
+                    failed.append(filtered)
     return {
         "status": "ok" if not failed else "warning",
         "warnings": [],
@@ -85,12 +90,14 @@ def failed_batches(root_books_dir: Path, book_id: str) -> dict:
     }
 
 
-def latest_failed_paragraph_ids(root_books_dir: Path, book_id: str) -> list[str]:
-    report = failed_batches(root_books_dir, book_id)
+def latest_failed_paragraph_ids(root_books_dir: Path, book_id: str, pending_ids: set[str] | None = None) -> list[str]:
+    report = failed_batches(root_books_dir, book_id, pending_ids)
     ids = []
     seen = set()
     for batch in report["details"]["batches"]:
         for paragraph_id in batch.get("paragraph_ids", []):
+            if pending_ids is not None and paragraph_id not in pending_ids:
+                continue
             if paragraph_id not in seen:
                 seen.add(paragraph_id)
                 ids.append(paragraph_id)
@@ -120,6 +127,15 @@ def export_run_report(root_books_dir: Path, book_id: str, output: Path) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines), encoding="utf-8")
     return {"status": "ok", "warnings": [], "summary": {"book": book_id, "output": str(output)}, "details": report}
+
+
+def _filter_failed_batch(batch: dict, pending_ids: set[str] | None) -> dict | None:
+    if pending_ids is None:
+        return batch
+    paragraph_ids = [item for item in batch.get("paragraph_ids", []) if item in pending_ids]
+    if not paragraph_ids:
+        return None
+    return {**batch, "paragraph_ids": paragraph_ids, "resolved_by_later_success": len(paragraph_ids) != len(batch.get("paragraph_ids", []))}
 
 
 def _load_all_runs(root_books_dir: Path, book_id: str) -> list[dict]:

@@ -174,11 +174,14 @@ python3 main.py --agent-mode translate --book <书籍ID> --run-id first-pass --j
 python3 main.py --agent-mode run-report --book <书籍ID> --json
 python3 main.py --agent-mode failed-batches --book <书籍ID> --json
 python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+python3 main.py --agent-mode request-stop --book <书籍ID> --reason "pause" --json
+python3 main.py --agent-mode task-status --book <书籍ID> --json
+python3 main.py --agent-mode clear-stop --book <书籍ID> --json
 python3 main.py --agent-mode work-records --book <书籍ID> --json
 python3 main.py --agent-mode work-records --book <书籍ID> --collect-log-dir ../logs --json
 ```
 
-模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。
+模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。`retry-failed` 只会重试当前仍未翻译的失败段落，历史失败中后来已成功的段落会自动跳过。长任务可用 `request-stop` 请求优雅中断，运行中的翻译会在当前批次结束或下一次限流等待时保存进度退出；继续前用 `clear-stop` 清除停止请求。
 
 ## 单本小说工作记录
 

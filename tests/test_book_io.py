@@ -6,7 +6,7 @@ import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book
-from app.cli_main import run_folder
+from app.cli_main import retry_failed, run_folder
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -18,6 +18,7 @@ from app.placeholders import extract_placeholders, placeholder_mismatches
 from app.review import apply_review_fixes, review_translations
 from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, run_report
 from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
+from app.task_control import clear_stop, request_stop, stop_requested, task_status
 from app.terminology import Term, extract_term_candidates
 from app.translator import validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
@@ -372,6 +373,77 @@ def test_run_report_and_failed_ids(tmp_path: Path) -> None:
     assert report["summary"]["failed"] == 1
     assert failed["summary"]["failed"] == 1
     assert latest_failed_paragraph_ids(books_dir, "book") == ["p1", "p2"]
+
+
+def test_failed_batches_can_ignore_resolved_paragraphs(tmp_path: Path) -> None:
+    books_dir = tmp_path / "books"
+    record_batch(
+        books_dir,
+        "book",
+        "run-1",
+        {
+            "batch_id": "run-1-b0001",
+            "status": "failed",
+            "paragraph_ids": ["p1", "p2"],
+            "model": "test-model",
+            "duration_seconds": 0.1,
+            "retry_count": 0,
+            "error": "temporary",
+            "warnings": [],
+        },
+    )
+
+    report = run_report(books_dir, "book", pending_ids={"p2"})
+    failed = failed_batches(books_dir, "book", pending_ids={"p2"})
+
+    assert report["summary"]["failed"] == 1
+    assert report["summary"]["historical_failed"] == 1
+    assert failed["details"]["batches"][0]["paragraph_ids"] == ["p2"]
+    assert latest_failed_paragraph_ids(books_dir, "book", pending_ids={"p2"}) == ["p2"]
+
+
+def test_task_control_stop_request_round_trip(tmp_path: Path) -> None:
+    books_dir = tmp_path / "books"
+
+    requested = request_stop(books_dir, "book", "pause")
+    status = task_status(books_dir, "book")
+
+    assert requested["summary"]["stop_requested"] is True
+    assert stop_requested(books_dir, "book") is True
+    assert status["summary"]["stop_requested"] is True
+    cleared = clear_stop(books_dir, "book")
+    assert cleared["summary"]["cleared"] is True
+    assert stop_requested(books_dir, "book") is False
+
+
+def test_retry_failed_dry_run_does_not_write_source_as_translation(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("Hello.\n\nWorld.", encoding="utf-8")
+    book = load_txt_book(source, title="Retry Dry Run")
+    config = _app_config(tmp_path)
+    books_dir = config.books_dir
+    save_book(books_dir, book, source)
+    record_batch(
+        books_dir,
+        book.id,
+        "run-1",
+        {
+            "batch_id": "run-1-b0001",
+            "status": "failed",
+            "paragraph_ids": [book.paragraphs[0].id],
+            "model": "test-model",
+            "duration_seconds": 0.1,
+            "retry_count": 0,
+            "error": "temporary",
+            "warnings": [],
+        },
+    )
+    report = retry_failed(config, argparse.Namespace(book=book.id, run_id="retry-1", dry_run=True))
+    reloaded = load_book(books_dir, book.id)
+
+    assert report["summary"]["dry_run"] is True
+    assert report["summary"]["retried"] == 1
+    assert reloaded.paragraphs[0].translated == ""
 
 
 def test_analysis_and_translation_plan_report_risks(tmp_path: Path) -> None:
