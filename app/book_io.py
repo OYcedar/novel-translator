@@ -16,8 +16,13 @@ from app.models import Book, Chapter, Paragraph, slugify
 
 CONTAINER_NS = "urn:oasis:names:tc:opendocument:xmlns:container"
 OPF_NS = "http://www.idpf.org/2007/opf"
+XHTML_NS = "http://www.w3.org/1999/xhtml"
+EPUB_NS = "http://www.idpf.org/2007/ops"
 TRANSLATABLE_TAGS = {"p", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "div"}
 RISK_TAGS = {"ruby", "rt", "rp", "table", "pre", "code", "script", "style"}
+
+ET.register_namespace("", XHTML_NS)
+ET.register_namespace("epub", EPUB_NS)
 
 
 @dataclass(frozen=True)
@@ -489,17 +494,37 @@ def export_epub(book: Book, output: Path, epub_config: EpubConfig | None = None,
     with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(output, "w") as dst:
         nav_path = book.metadata.get("epub", {}).get("nav_path", "")
         toc_path = book.metadata.get("epub", {}).get("toc_path", "")
-        for info in src.infolist():
+        infos = src.infolist()
+        mimetype_info = next((info for info in infos if info.filename == "mimetype"), None)
+        if mimetype_info is not None:
+            _write_epub_member(dst, mimetype_info, src.read(mimetype_info.filename), force_stored=True)
+        for info in infos:
+            if info.filename == "mimetype":
+                continue
             data = src.read(info.filename)
-            chapter = by_chapter.get(info.filename)
-            if chapter is not None:
-                data, chapter_warnings = _replace_chapter_by_locator(data, chapter, config, bilingual=bilingual)
-                warnings.extend(f"{info.filename}: {message}" for message in chapter_warnings)
-            elif title_translations and ((config.translate_nav and info.filename == nav_path) or (config.translate_toc and info.filename == toc_path)):
+            is_nav = config.translate_nav and info.filename == nav_path
+            is_toc = config.translate_toc and info.filename == toc_path
+            if title_translations and (is_nav or is_toc):
                 data, nav_warnings = _replace_navigation_text(data, title_translations)
                 warnings.extend(f"{info.filename}: {message}" for message in nav_warnings)
-            dst.writestr(info, data)
+            else:
+                chapter = by_chapter.get(info.filename)
+                if chapter is not None:
+                    data, chapter_warnings = _replace_chapter_by_locator(data, chapter, config, bilingual=bilingual)
+                    warnings.extend(f"{info.filename}: {message}" for message in chapter_warnings)
+            _write_epub_member(dst, info, data)
     return {"warnings": warnings, "warning_count": len(warnings)}
+
+
+def _write_epub_member(dst: zipfile.ZipFile, info: zipfile.ZipInfo, data: bytes, *, force_stored: bool = False) -> None:
+    out_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+    out_info.comment = info.comment
+    out_info.extra = info.extra
+    out_info.internal_attr = info.internal_attr
+    out_info.external_attr = info.external_attr
+    out_info.create_system = info.create_system
+    out_info.compress_type = zipfile.ZIP_STORED if force_stored else info.compress_type
+    dst.writestr(out_info, data)
 
 
 def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfig, *, bilingual: bool = False) -> tuple[bytes, list[str]]:

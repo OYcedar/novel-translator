@@ -176,6 +176,104 @@ def test_epub_export_bilingual_uses_node_locator(tmp_path: Path) -> None:
     assert xhtml.index("第一处。") < xhtml.index("第二处。")
 
 
+def test_epub_export_translates_spine_nav_without_breaking_links(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书</dc:title></metadata>
+  <manifest>
+    <item id="nav" href="Text/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="nav"/><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/nav.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body><nav epub:type="toc"><h2>测试书</h2><ol><li><a href="chapter1.xhtml">第一章</a></li></ol></nav></body></html>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>Hello.</p></body></html>""",
+        )
+    book = load_epub_book(epub)
+    for paragraph in book.paragraphs:
+        if paragraph.source == "测试书":
+            paragraph.translated = "测试书译名"
+        elif paragraph.source == "第一章":
+            paragraph.translated = "第一章译名"
+        elif paragraph.source == "Hello.":
+            paragraph.translated = "你好。"
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    export_epub(book, output)
+    with zipfile.ZipFile(output) as archive:
+        nav = archive.read("OEBPS/Text/nav.xhtml").decode("utf-8")
+        chapter = archive.read("OEBPS/Text/chapter1.xhtml").decode("utf-8")
+
+    assert 'href="chapter1.xhtml"' in nav
+    assert ">第一章译名</a>" in nav
+    assert "<a href=\"chapter1.xhtml\" />" not in nav
+    assert "你好。" in chapter
+
+
+def test_epub_export_writes_mimetype_first_and_uncompressed(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书</dc:title></metadata>
+  <manifest><item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello.</p></body></html>""",
+        )
+    book = load_epub_book(epub)
+    book.paragraphs[0].translated = "你好。"
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    export_epub(book, output)
+    with zipfile.ZipFile(output) as archive:
+        infos = archive.infolist()
+
+    assert infos[0].filename == "mimetype"
+    assert infos[0].compress_type == zipfile.ZIP_STORED
+
+
 def test_extract_term_candidates_counts_repeated_names(tmp_path: Path) -> None:
     source = tmp_path / "novel.txt"
     source.write_text("Alice opened the door.\n\nAlice saw Bob.\n\nBob smiled at Alice.", encoding="utf-8")
