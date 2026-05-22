@@ -181,7 +181,7 @@ python3 main.py --agent-mode work-records --book <书籍ID> --json
 python3 main.py --agent-mode work-records --book <书籍ID> --collect-log-dir ../logs --json
 ```
 
-模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。`retry-failed` 只会重试当前仍未翻译的失败段落，历史失败中后来已成功的段落会自动跳过。长任务可用 `request-stop` 请求优雅中断，运行中的翻译会在当前批次结束或下一次限流等待时保存进度退出；继续前用 `clear-stop` 清除停止请求。
+模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。并发翻译会在每个批次完成后立刻记录 run、保存译文和翻译记忆；检测到 HTTP 402 或 Insufficient Balance 时会停止继续派发新请求并取消未开始批次。`retry-failed` 只会重试当前仍未翻译的失败段落，历史失败中后来已成功的段落会自动跳过。长任务可用 `request-stop` 请求优雅中断，运行中的翻译会在当前批次结束或下一次限流等待时保存进度退出；继续前用 `clear-stop` 清除停止请求。
 
 ## 单本小说工作记录
 

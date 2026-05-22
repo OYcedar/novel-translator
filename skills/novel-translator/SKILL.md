@@ -82,5 +82,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 - 运行中的长篇翻译需要暂停时，优先执行 `request-stop --book <书籍ID> --reason <原因> --json`；新版本翻译进程会在当前批次结束或限流等待点保存进度并退出。
 - 恢复前执行 `task-status --book <书籍ID> --json` 查看停止请求，再用 `clear-stop --book <书籍ID> --json` 清除停止标记，然后重新运行 `translate`。
 - 旧版本后台进程不认识停止请求；如果代码刚升级过，需要先结束旧进程，再用新代码重启任务。
+- 并发翻译必须在每个批次完成后立刻落盘并记录 run，不要等全部并发批次结束后再统一写入。
+- 检测到 HTTP 402 或 Insufficient Balance 欠费错误时，立刻停止继续派发翻译请求，取消未开始批次，并向用户报告需要充值。
 - `retry-failed --dry-run` 只能生成待重试计划，不能写入译文、不能清空译文、不能创建伪成功进度。
 - `retry-failed` 只重试当前仍未翻译的失败段落；历史失败里后来已成功的段落必须自动跳过。

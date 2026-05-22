@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -614,78 +614,112 @@ def translate(config: AppConfig, args: argparse.Namespace) -> dict:
             stopped=True,
         )
     if workers > 1 and len(batches) > 1 and not getattr(args, "dry_run", False) and not stop_on_warning:
-        completed = []
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {}
-            for index, batch in enumerate(batches, start=1):
+        batch_queue = iter(enumerate(batches, start=1))
+        futures = {}
+        fatal_billing_error = False
+        executor = ThreadPoolExecutor(max_workers=workers)
+        try:
+            def submit_batch(index, batch) -> bool:
+                nonlocal stopped
                 if stop_requested(config.books_dir, book.id):
                     stopped = True
-                    break
+                    return False
                 if index > 1:
                     if _sleep_with_stop(config.books_dir, book.id, _rate_limit_delay(batch, rpm, tpm)):
                         stopped = True
-                        break
+                        return False
                 batch_id = f"{run_id}-b{index:04d}"
                 started = time.time()
                 future = executor.submit(_translate_one_batch, config, batch, terms, book, context, False)
                 futures[future] = (index, batch_id, batch, started)
-            for future in as_completed(futures):
-                index, batch_id, batch, started = futures[future]
+                return True
+
+            for _ in range(min(workers, len(batches))):
                 try:
-                    result, warnings = future.result()
-                    completed.append((index, batch_id, batch, started, result, warnings, ""))
-                except Exception as exc:
-                    completed.append((index, batch_id, batch, started, {}, [], str(exc)))
-        for _index, batch_id, batch, started, result, warnings, error in sorted(completed, key=lambda item: item[0]):
-            if error:
-                batch_failed += 1
-                record_batch(
-                    config.books_dir,
-                    book.id,
-                    run_id,
-                    _batch_record(
-                        batch_id,
-                        batch,
-                        status="failed",
-                        started=started,
-                        error=error,
-                        warnings=warnings,
-                        model=config.llm.model,
-                        retry_count=0,
-                        result=result,
-                        memory_hits=0,
-                        rate_limited=False,
-                    ),
-                )
-                continue
-            for paragraph in batch:
-                translated = result.get(paragraph.id, "").strip()
-                if translated:
-                    paragraph.translated = translated
-                    saved_translations += 1
-                    remember_translation(memory_entries, source=paragraph.source, translated=translated, term_hash=term_hash, model=config.llm.model)
-            batch_succeeded += 1
-            batch_warnings.extend(warnings)
-            record_batch(
-                config.books_dir,
-                book.id,
-                run_id,
-                _batch_record(
-                    batch_id,
-                    batch,
-                    status="succeeded",
-                    started=started,
-                    error="",
-                    warnings=warnings,
-                    model=config.llm.model,
-                    retry_count=0,
-                    result=result,
-                    memory_hits=0,
-                    rate_limited=False,
-                ),
-            )
-        persist_book(config.books_dir, book)
-        save_memory(config.books_dir, book.id, memory_entries)
+                    index, batch = next(batch_queue)
+                except StopIteration:
+                    break
+                if not submit_batch(index, batch):
+                    break
+
+            while futures and not stopped:
+                done, _pending = wait(futures, return_when=FIRST_COMPLETED)
+                for future in done:
+                    index, batch_id, batch, started = futures.pop(future)
+                    result: dict[str, str] = {}
+                    warnings: list[str] = []
+                    error = ""
+                    try:
+                        result, warnings = future.result()
+                    except Exception as exc:
+                        error = str(exc)
+                    if error:
+                        batch_failed += 1
+                        record_batch(
+                            config.books_dir,
+                            book.id,
+                            run_id,
+                            _batch_record(
+                                batch_id,
+                                batch,
+                                status="failed",
+                                started=started,
+                                error=error,
+                                warnings=warnings,
+                                model=config.llm.model,
+                                retry_count=0,
+                                result=result,
+                                memory_hits=0,
+                                rate_limited=False,
+                            ),
+                        )
+                        if _is_billing_error(error):
+                            fatal_billing_error = True
+                            stopped = True
+                            batch_warnings.append("检测到余额不足或 402 欠费错误，已停止继续派发翻译请求。")
+                    else:
+                        for paragraph in batch:
+                            translated = result.get(paragraph.id, "").strip()
+                            if translated:
+                                paragraph.translated = translated
+                                saved_translations += 1
+                                remember_translation(memory_entries, source=paragraph.source, translated=translated, term_hash=term_hash, model=config.llm.model)
+                        batch_succeeded += 1
+                        batch_warnings.extend(warnings)
+                        record_batch(
+                            config.books_dir,
+                            book.id,
+                            run_id,
+                            _batch_record(
+                                batch_id,
+                                batch,
+                                status="succeeded",
+                                started=started,
+                                error="",
+                                warnings=warnings,
+                                model=config.llm.model,
+                                retry_count=0,
+                                result=result,
+                                memory_hits=0,
+                                rate_limited=False,
+                            ),
+                        )
+                    persist_book(config.books_dir, book)
+                    save_memory(config.books_dir, book.id, memory_entries)
+                    if stopped:
+                        break
+                    try:
+                        next_index, next_batch = next(batch_queue)
+                    except StopIteration:
+                        continue
+                    submit_batch(next_index, next_batch)
+        finally:
+            if stopped:
+                for pending_future in futures:
+                    pending_future.cancel()
+                executor.shutdown(wait=not fatal_billing_error, cancel_futures=True)
+            else:
+                executor.shutdown(wait=True, cancel_futures=False)
         return _translate_result(
             book,
             run_id,
@@ -936,6 +970,11 @@ def _sleep_with_stop(root_books_dir: Path, book_id: str, seconds: float) -> bool
             return True
         time.sleep(min(1, deadline - time.time()))
     return stop_requested(root_books_dir, book_id)
+
+
+def _is_billing_error(error: str) -> bool:
+    lowered = error.lower()
+    return "insufficient balance" in lowered or "error code: 402" in lowered or "http 402" in lowered
 
 
 def repair_translations(config: AppConfig, args: argparse.Namespace) -> dict:
