@@ -335,6 +335,108 @@ def test_validate_epub_reports_empty_nav_anchor(tmp_path: Path) -> None:
     assert any(error["code"] == "epub_nav_empty_anchor" for error in report["errors"])
 
 
+def test_epub_export_keeps_ncx_default_namespace_for_mobile_readers(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书</dc:title></metadata>
+  <manifest>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="c1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="toc"><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/toc.ncx",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+<head><meta name="dtb:uid" content="test"/></head>
+<docTitle><text>测试书</text></docTitle>
+<navMap><navPoint id="nav-1"><navLabel><text>第一章</text></navLabel><content src="Text/chapter1.xhtml"/></navPoint></navMap>
+</ncx>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>Hello.</p></body></html>""",
+        )
+    book = load_epub_book(epub)
+    for paragraph in book.paragraphs:
+        if paragraph.source == "第一章":
+            paragraph.translated = "第一章译名"
+        elif paragraph.source == "Hello.":
+            paragraph.translated = "你好。"
+    book.source_file = str(epub)
+
+    output = tmp_path / "translated.epub"
+    export_epub(book, output)
+    with zipfile.ZipFile(output) as archive:
+        toc = archive.read("OEBPS/toc.ncx").decode("utf-8")
+
+    assert "<ncx " in toc
+    assert "<ns0:ncx" not in toc
+    assert "第一章译名" in toc
+
+
+def test_validate_epub_reports_prefixed_ncx_namespace(tmp_path: Path) -> None:
+    epub = tmp_path / "prefixed.epub"
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书</dc:title></metadata>
+  <manifest>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="c1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="toc"><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/toc.ncx",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<ns0:ncx xmlns:ns0="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+<ns0:navMap><ns0:navPoint id="nav-1"><ns0:navLabel><ns0:text>第一章</ns0:text></ns0:navLabel><ns0:content src="Text/chapter1.xhtml"/></ns0:navPoint></ns0:navMap>
+</ns0:ncx>""",
+        )
+        archive.writestr(
+            "OEBPS/Text/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello.</p></body></html>""",
+        )
+
+    report = validate_epub(epub)
+
+    assert report["status"] == "error"
+    assert report["summary"]["toc_prefixed_namespace"] is True
+    assert any(error["code"] == "epub_toc_prefixed_namespace" for error in report["errors"])
+
+
 def test_extract_term_candidates_counts_repeated_names(tmp_path: Path) -> None:
     source = tmp_path / "novel.txt"
     source.write_text("Alice opened the door.\n\nAlice saw Bob.\n\nBob smiled at Alice.", encoding="utf-8")

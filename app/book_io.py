@@ -19,6 +19,7 @@ CONTAINER_NS = "urn:oasis:names:tc:opendocument:xmlns:container"
 OPF_NS = "http://www.idpf.org/2007/opf"
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 EPUB_NS = "http://www.idpf.org/2007/ops"
+NCX_NS = "http://www.daisy.org/z3986/2005/ncx/"
 TRANSLATABLE_TAGS = {"p", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "div"}
 RISK_TAGS = {"ruby", "rt", "rp", "table", "pre", "code", "script", "style"}
 
@@ -219,6 +220,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
         "nav_broken_links": 0,
         "nav_empty_anchors": 0,
         "toc_broken_links": 0,
+        "toc_prefixed_namespace": False,
     }
     try:
         with zipfile.ZipFile(path) as archive:
@@ -258,6 +260,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
             spine_missing = [item.path for item in all_spine_items if item.path not in names]
             nav_links = _validate_link_file(archive, nav_path, names, "href") if nav_path else {"count": 0, "broken": [], "empty_anchors": 0}
             toc_links = _validate_link_file(archive, toc_path, names, "src") if toc_path else {"count": 0, "broken": [], "empty_anchors": 0}
+            toc_prefixed_namespace = _has_prefixed_root(archive, toc_path, "ncx") if toc_path else False
             summary.update(
                 {
                     "epub_version": _opf_version(opf),
@@ -277,6 +280,7 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                     "nav_empty_anchors": nav_links["empty_anchors"],
                     "toc_link_count": toc_links["count"],
                     "toc_broken_links": len(toc_links["broken"]),
+                    "toc_prefixed_namespace": toc_prefixed_namespace,
                 }
             )
             if not nav_path:
@@ -293,6 +297,8 @@ def validate_epub(path: Path, epub_config: EpubConfig | None = None) -> dict:
                 errors.append({"code": "epub_nav_empty_anchor", "message": f"nav 中存在 {nav_links['empty_anchors']} 个空链接文本"})
             for src, target in toc_links["broken"][:20]:
                 errors.append({"code": "epub_toc_broken_link", "message": f"toc 链接不存在：{src} -> {target}"})
+            if toc_prefixed_namespace:
+                errors.append({"code": "epub_toc_prefixed_namespace", "message": "toc.ncx 使用了带前缀的 ncx 根标签，部分 Android 阅读器会加载目录失败"})
             details = {
                 "manifest_missing": manifest_missing,
                 "spine_missing": spine_missing,
@@ -352,6 +358,14 @@ def _validate_link_file(archive: zipfile.ZipFile, path: str, names: set[str], at
         empty_anchors = len(re.findall(r"<(?:\w+:)?a\b[^>]*href\s*=\s*['\"][^'\"]+['\"][^>]*/>", data, flags=re.I))
         empty_anchors += len(re.findall(r"<(?:\w+:)?a\b[^>]*href\s*=\s*['\"][^'\"]+['\"][^>]*>\s*</(?:\w+:)?a>", data, flags=re.I | re.S))
     return {"count": len(values), "broken": broken, "empty_anchors": empty_anchors}
+
+
+def _has_prefixed_root(archive: zipfile.ZipFile, path: str, local_name: str) -> bool:
+    if not path or path not in archive.namelist():
+        return False
+    data = archive.read(path).decode("utf-8", errors="replace")
+    match = re.search(r"<([A-Za-z_][\w.-]*):" + re.escape(local_name) + r"\b", data)
+    return bool(match)
 
 
 def _attribute_values(text: str, attr: str) -> list[str]:
@@ -720,7 +734,7 @@ def _replace_chapter_by_locator(data: bytes, chapter: Chapter, config: EpubConfi
             warnings.append(f"{paragraph.id} 节点原文 hash 不一致，已保留原文")
             continue
         _set_element_text(element, _export_text(paragraph.source, paragraph.translated, bilingual=bilingual), config=config)
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True), warnings
+    return _serialize_xml(root), warnings
 
 
 def _replace_chapter_by_locator_with_soup(data: bytes, chapter: Chapter, config: EpubConfig, *, bilingual: bool = False) -> tuple[bytes, list[str]] | None:
@@ -921,7 +935,21 @@ def _replace_navigation_text(data: bytes, title_translations: dict[str, str]) ->
         if text in title_translations and not list(element):
             element.text = title_translations[text]
             changed += 1
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True), [] if changed else []
+    return _serialize_xml(root), [] if changed else []
+
+
+def _serialize_xml(root: ET.Element) -> bytes:
+    namespace = _namespace_uri(root.tag)
+    if namespace:
+        ET.register_namespace("", namespace)
+    ET.register_namespace("epub", EPUB_NS)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _namespace_uri(tag: str) -> str:
+    if tag.startswith("{"):
+        return tag[1:].split("}", 1)[0]
+    return ""
 
 
 def _inline_children_safe(element: ET.Element, safe_tags: set[str]) -> bool:
