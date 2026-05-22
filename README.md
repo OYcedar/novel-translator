@@ -1,6 +1,6 @@
 # Novel Translator 快速开始
 
-Novel Translator 是一个模仿 A.T.T MZ 工作流的 Agent 友好型小说翻译工具，面向 `.epub` 和 `.txt` 小说文件。它会先把小说注册到本地工作区，拆成稳定段落 ID，再调用 OpenAI 兼容接口批量翻译，最后导出译文。
+Novel Translator 是一个参考 [A.T.T MZ](https://github.com/yexi-by/att-mz) 工作流构建的 Agent 友好型小说翻译工具，面向 `.epub` 和 `.txt` 小说文件。它会先把小说注册到本地工作区，拆成稳定段落 ID，再调用 OpenAI 兼容接口批量翻译，最后导出译文。
 
 ## 适合什么
 
@@ -223,3 +223,7 @@ warn_on_duplicate_source = true
 ```
 
 EPUB 导出会复制原始 EPUB，保留 CSS、图片和元数据，并替换 spine 章节中的译文节点。`ruby`、脚注链接、表格、代码块、图片文字等复杂结构会在 `quality-report` 的 `epub_markup_risk` 中提示；最终发布前建议运行 `validate-export`，并抽查 EPUB 阅读器效果。
+
+## 特别感谢
+
+本项目的流程设计、Agent 工作区思路和质量闭环设计参考了 [A.T.T MZ](https://github.com/yexi-by/att-mz)。特别感谢 A.T.T MZ 原作者 [yexi-by](https://github.com/yexi-by) 的开源项目与工作流启发。
