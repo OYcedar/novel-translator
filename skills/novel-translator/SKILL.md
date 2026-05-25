@@ -33,6 +33,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 | 命令调用与成功判断 | `references/cli-command-contract.md` | 运行或排查任一 CLI 阶段前 |
 | 术语工程 | `references/terminology-workflow.md` | 导出、填写、审查或导入术语表前 |
 | 质量检查与恢复 | `references/quality-and-recovery.md` | `quality-report` 有 warning/error、需要人工修复或反馈定位时 |
+| 实战经验复盘 | `../../docs/translation-lessons.md` | 长篇 EPUB 交付、称呼校对、EPUB 实机兼容或成品验收前 |
 
 只读取当前阶段需要的参考文件，不要把参考资料全文复制进模型 prompt 或交付报告。
 
