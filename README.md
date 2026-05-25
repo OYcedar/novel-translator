@@ -28,45 +28,45 @@ timeout = 600
 
 ## 常用命令
 
-```bash
-python3 main.py --agent-mode doctor --json
-python3 main.py --agent-mode inspect-epub --path ./novel.epub --json
-python3 main.py --agent-mode add-book --path ./novel.epub --json
-python3 main.py --agent-mode list --json
-python3 main.py --agent-mode text-scope --book <书籍ID> --json
-python3 main.py --agent-mode analyze-book --book <书籍ID> --json
-python3 main.py --agent-mode export-terminology --book <书籍ID> --output-dir ./workspace --json
-python3 main.py --agent-mode import-terminology --book <书籍ID> --input ./workspace/terminology/glossary.json --json
-python3 main.py --agent-mode terminology-status --book <书籍ID> --json
-python3 main.py --agent-mode prepare-agent-workspace --book <书籍ID> --output-dir ./workspace --json
-python3 main.py --agent-mode validate-agent-workspace --book <书籍ID> --workspace ./workspace --json
-python3 main.py --agent-mode audit-coverage --book <书籍ID> --json
-python3 main.py --agent-mode summarize-context --book <书籍ID> --json
-python3 main.py --agent-mode context-status --book <书籍ID> --json
-python3 main.py --agent-mode translation-plan --book <书籍ID> --json
-python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --workers 1 --rpm 30 --json
-python3 main.py --agent-mode run-report --book <书籍ID> --json
-python3 main.py --agent-mode export-run-report --book <书籍ID> --output ./run-report.md --json
-python3 main.py --agent-mode failed-batches --book <书籍ID> --json
-python3 main.py --agent-mode retry-failed --book <书籍ID> --json
-python3 main.py --agent-mode review-translations --book <书籍ID> --mode risk --json
-python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id <审校ID> --output ./review.md --json
-python3 main.py --agent-mode snapshot --book <书籍ID> --name before-final --json
-python3 main.py --agent-mode translation-memory-status --book <书籍ID> --json
-python3 main.py --agent-mode translation-status --book <书籍ID> --json
-python3 main.py --agent-mode quality-report --book <书籍ID> --json
-python3 main.py --agent-mode export-pending-translations --book <书籍ID> --output ./pending.json --json
-python3 main.py --agent-mode export-quality-fix --book <书籍ID> --output ./quality-fix.json --json
-python3 main.py --agent-mode import-manual-translations --book <书籍ID> --input ./manual.json --json
-python3 main.py --agent-mode reset-translations --book <书籍ID> --input ./reset.json --json
-python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input ./feedback.txt --json
-python3 main.py --agent-mode export-epub-risk-report --book <书籍ID> --output ./epub-risk.md --json
-python3 main.py --agent-mode run-pipeline --book <书籍ID> --json
-python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json
-python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json
-python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json
-python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json
-```
+| 命令 | 备注 |
+| --- | --- |
+| `python3 main.py --agent-mode doctor --json` | 检查配置文件、项目目录和 Python 环境；首次使用先跑。 |
+| `python3 main.py --agent-mode inspect-epub --path ./novel.epub --json` | 注册 EPUB 前检查内部结构、目录、spine、重复文本和格式风险。 |
+| `python3 main.py --agent-mode add-book --path ./novel.epub --json` | 注册 EPUB/TXT 小说，返回后续命令使用的 `<书籍ID>`。 |
+| `python3 main.py --agent-mode list --json` | 查看本地已注册书籍。 |
+| `python3 main.py --agent-mode text-scope --book <书籍ID> --json` | 查看章节和段落范围，确认拆分是否合理。 |
+| `python3 main.py --agent-mode analyze-book --book <书籍ID> --json` | 生成译前项目画像，统计对话比例、重复文本、术语密度和 EPUB 风险。 |
+| `python3 main.py --agent-mode export-terminology --book <书籍ID> --output-dir ./workspace --json` | 导出术语候选和上下文，供人工或 Agent 填写译名。 |
+| `python3 main.py --agent-mode import-terminology --book <书籍ID> --input ./workspace/terminology/glossary.json --json` | 导入审定后的术语表。 |
+| `python3 main.py --agent-mode terminology-status --book <书籍ID> --json` | 检查术语冲突、空译名和术语数量。 |
+| `python3 main.py --agent-mode prepare-agent-workspace --book <书籍ID> --output-dir ./workspace --json` | 导出 Agent 工作区，包含文本范围、术语和质量报告。 |
+| `python3 main.py --agent-mode validate-agent-workspace --book <书籍ID> --workspace ./workspace --json` | 校验 Agent 工作区文件和段落 ID 是否匹配当前书籍。 |
+| `python3 main.py --agent-mode audit-coverage --book <书籍ID> --json` | 审计翻译覆盖率、未译段落和可导出格式。 |
+| `python3 main.py --agent-mode summarize-context --book <书籍ID> --json` | 生成章节摘要，长篇小说建议翻译前执行。 |
+| `python3 main.py --agent-mode context-status --book <书籍ID> --json` | 检查章节上下文是否齐全。 |
+| `python3 main.py --agent-mode translation-plan --book <书籍ID> --json` | 根据画像、术语和上下文生成 Agent 执行建议。 |
+| `python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --workers 1 --rpm 30 --json` | 小批量试翻；确认质量后再去掉 `--max-batches 1` 全量翻译。 |
+| `python3 main.py --agent-mode run-report --book <书籍ID> --json` | 查看批次成功/失败、字符数、记忆命中和限速记录。 |
+| `python3 main.py --agent-mode export-run-report --book <书籍ID> --output ./run-report.md --json` | 导出 Markdown 运行报告，适合交付或人工复盘。 |
+| `python3 main.py --agent-mode failed-batches --book <书籍ID> --json` | 列出失败批次和对应段落 ID。 |
+| `python3 main.py --agent-mode retry-failed --book <书籍ID> --json` | 只重试当前仍未翻译的失败段落。 |
+| `python3 main.py --agent-mode review-translations --book <书籍ID> --mode risk --json` | 审校风险段落，只生成建议，不直接覆盖译文。 |
+| `python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id <审校ID> --output ./review.md --json` | 将审校 JSON 导出为 Markdown 报告。 |
+| `python3 main.py --agent-mode snapshot --book <书籍ID> --name before-final --json` | 创建译文快照；大规模修复前建议先保存。 |
+| `python3 main.py --agent-mode translation-memory-status --book <书籍ID> --json` | 查看翻译记忆数量和当前术语 hash 下的可复用数量。 |
+| `python3 main.py --agent-mode translation-status --book <书籍ID> --json` | 查看总段落、已译、待译和进度。 |
+| `python3 main.py --agent-mode quality-report --book <书籍ID> --json` | 检查未译、源文残留、术语、占位符、风格和 EPUB 风险。 |
+| `python3 main.py --agent-mode export-pending-translations --book <书籍ID> --output ./pending.json --json` | 导出未译段落，适合人工补译。 |
+| `python3 main.py --agent-mode export-quality-fix --book <书籍ID> --output ./quality-fix.json --json` | 导出质量问题段落，供人工填写修复译文。 |
+| `python3 main.py --agent-mode import-manual-translations --book <书籍ID> --input ./manual.json --json` | 导入人工译文；未知段落 ID 会失败。 |
+| `python3 main.py --agent-mode reset-translations --book <书籍ID> --input ./reset.json --json` | 精确清空坏译文，输入为段落 ID 数组或对象数组。 |
+| `python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input ./feedback.txt --json` | 按读者反馈文本反查原文/译文段落。 |
+| `python3 main.py --agent-mode export-epub-risk-report --book <书籍ID> --output ./epub-risk.md --json` | 导出 EPUB 标记风险报告，发布前用于人工复核。 |
+| `python3 main.py --agent-mode run-pipeline --book <书籍ID> --json` | 执行快照、分析、计划、上下文、翻译、重试、质量和审校流水线。 |
+| `python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json` | 生成交付包，包含译本、质量报告、运行报告、术语和元数据。 |
+| `python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json` | 导出前检查；最终交付不能有 error。 |
+| `python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json` | 导出 TXT 译本。 |
+| `python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json` | 导出 EPUB 译本；仅 EPUB 源书可用。 |
 
 排查流程可先用 `--dry-run` 不调用模型：
 
