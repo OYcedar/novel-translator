@@ -1,14 +1,16 @@
-# Novel Translator 快速开始
+# Novel Translator
 
 Novel Translator 是一个参考 [A.T.T MZ](https://github.com/yexi-by/att-mz) 工作流构建的 Agent 友好型小说翻译工具，面向 `.epub` 和 `.txt` 小说文件。它会先把小说注册到本地工作区，拆成稳定段落 ID，再调用 OpenAI 兼容接口批量翻译，最后导出译文。
 
-## 适合什么
+## 快速上手
+
+### 适合什么
 
 - 翻译 EPUB 或 TXT 小说。
 - 让 Agent 按命令注册书籍、查看文本范围、分批翻译、检查质量、导出成品。
 - 中断后继续翻译，已完成段落会保存在 `data/books/<书籍ID>/manifest.json`。
 
-## 准备配置
+### 1. 准备配置
 
 复制配置示例：
 
@@ -26,7 +28,72 @@ model = "<模型名>"
 timeout = 600
 ```
 
-## 常用命令
+先检查环境：
+
+```bash
+python3 main.py --agent-mode doctor --json
+```
+
+### 2. 注册小说
+
+EPUB 建议先检查内部结构，再注册：
+
+```bash
+python3 main.py --agent-mode inspect-epub --path ./novel.epub --json
+python3 main.py --agent-mode add-book --path ./novel.epub --json
+python3 main.py --agent-mode text-scope --book <书籍ID> --json
+```
+
+TXT 可以直接注册：
+
+```bash
+python3 main.py --agent-mode add-book --path ./novel.txt --json
+python3 main.py --agent-mode text-scope --book <书籍ID> --json
+```
+
+### 3. 译前准备
+
+先生成项目画像和术语表，长篇小说再生成章节上下文：
+
+```bash
+python3 main.py --agent-mode analyze-book --book <书籍ID> --json
+python3 main.py --agent-mode export-terminology --book <书籍ID> --output-dir ./workspace --json
+python3 main.py --agent-mode import-terminology --book <书籍ID> --input ./workspace/terminology/glossary.json --json
+python3 main.py --agent-mode summarize-context --book <书籍ID> --json
+python3 main.py --agent-mode translation-plan --book <书籍ID> --json
+```
+
+### 4. 翻译与检查
+
+先小批量试翻，确认质量后再全量翻译：
+
+```bash
+python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --json
+python3 main.py --agent-mode translate --book <书籍ID> --workers 1 --rpm 30 --json
+python3 main.py --agent-mode run-report --book <书籍ID> --json
+python3 main.py --agent-mode retry-failed --book <书籍ID> --json
+python3 main.py --agent-mode quality-report --book <书籍ID> --json
+```
+
+### 5. 导出或交付
+
+导出单个译本：
+
+```bash
+python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json
+python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json
+python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json
+```
+
+生成包含译本、报告、术语和元数据的交付包：
+
+```bash
+python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json
+```
+
+## 详细说明
+
+### 常用命令
 
 | 命令 | 备注 |
 | --- | --- |
@@ -74,7 +141,7 @@ timeout = 600
 python3 main.py --agent-mode translate --book <书籍ID> --dry-run --json
 ```
 
-## Agent 工作流建议
+### Agent 工作流建议
 
 项目内置了 Agent Skill：
 
@@ -103,7 +170,7 @@ skills/novel-translator/SKILL.md
 17. `quality-report --book <书籍ID> --json` 检查未译、源语言残留、术语、占位符、风格和审校风险。
 18. `package-delivery --book <书籍ID> --output-dir <交付目录> --json` 生成译本、报告、术语和元数据交付包。
 
-## 术语表流程
+### 术语表流程
 
 术语表保存在：
 
@@ -141,7 +208,7 @@ workspace/
 
 翻译时，命中当前批次原文的术语会被注入模型请求的 `glossary` 字段。质量报告会检查：如果原文包含术语 `source`，译文必须包含对应 `target`。
 
-## 长篇稳定翻译
+### 长篇稳定翻译
 
 工具会在每本书目录下维护三类长篇状态：
 
@@ -183,7 +250,7 @@ python3 main.py --agent-mode work-records --book <书籍ID> --collect-log-dir ..
 
 模型输出会进行批次级校验：缺少段落 ID 会让该批失败；未知 ID、空译文、占位符缺失和术语缺失会进入 warning 或质量报告。需要完全绕过翻译记忆时，可传 `translate --no-memory`。并发翻译会在每个批次完成后立刻记录 run、保存译文和翻译记忆；检测到 HTTP 402 或 Insufficient Balance 时会停止继续派发新请求并取消未开始批次。`retry-failed` 只会重试当前仍未翻译的失败段落，历史失败中后来已成功的段落会自动跳过。长任务可用 `request-stop` 请求优雅中断，运行中的翻译会在当前批次结束或下一次限流等待时保存进度退出；继续前用 `clear-stop` 清除停止请求。
 
-## 单本小说工作记录
+### 单本小说工作记录
 
 每本小说可以有独立的过程记录目录，默认位于：
 
@@ -206,7 +273,7 @@ python3 main.py --agent-mode work-records --book <书籍ID> --collect-file ../im
 
 `data/books/<书籍ID>/` 仍然保存核心翻译状态；`work-records` 目录用于收纳后台脚本、日志、外部术语表、质检报告、审校材料和交付包。
 
-## Agent 工作区与人工修复
+### Agent 工作区与人工修复
 
 完整工作区会导出：
 
@@ -223,7 +290,7 @@ workspace/
 
 人工修复文件使用 JSON，不依赖 CSV/XLSX。`export-pending-translations` 导出未译段落，`export-quality-fix` 导出质量报告命中的段落；填写 `translated` 后用 `import-manual-translations` 导入。坏译文可用 `reset-translations --input reset.json` 精确清空，或明确传 `--all` 全量清空。
 
-## 审校、快照和交付
+### 审校、快照和交付
 
 成熟流水线会在翻译前后生成更多可追踪文件：
 
@@ -258,17 +325,17 @@ python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id 
 python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json
 ```
 
-## 占位符保护
+### 占位符保护
 
 翻译请求会把段落里的 `{name}`、`{{name}}`、`%s`、`%d`、HTML 标签和 `[#note]` 这类脚注锚点作为 `placeholders` 传给模型。译文必须原样保留这些占位符；`quality-report` 会用 `placeholder_mismatch` 报告缺失项。
 
-## 数据位置
+### 数据位置
 
 - 注册书籍和译文缓存：`data/books`
 - 原始文件副本：`data/books/<书籍ID>/source.epub` 或 `source.txt`
 - 系统提示词：`prompts/novel_translation_system.md`
 
-## EPUB 说明
+### EPUB 说明
 
 EPUB 导入会读取 OPF manifest/spine，支持 EPUB2 `toc.ncx`、EPUB3 `nav.xhtml`、`.xhtml`、`.html` 和 `.htm` 章节。导入时会为每个可翻译节点保存 `chapter_path`、`node_index`、`node_tag`、`node_id`、`node_class` 和 `text_hash`，导出时按节点定位回写，重复原文也能写回正确位置。
 
@@ -297,6 +364,6 @@ warn_on_duplicate_source = true
 
 EPUB 导出会复制原始 EPUB，保留 CSS、图片和元数据，并替换 spine 章节中的译文节点。`ruby`、脚注链接、表格、代码块、图片文字等复杂结构会在 `quality-report` 的 `epub_markup_risk` 中提示；最终发布前建议运行 `validate-export`，并抽查 EPUB 阅读器效果。
 
-## 特别感谢
+### 特别感谢
 
 本项目的流程设计、Agent 工作区思路和质量闭环设计参考了 [A.T.T MZ](https://github.com/yexi-by/att-mz)。特别感谢 A.T.T MZ 原作者 [yexi-by](https://github.com/yexi-by) 的开源项目与工作流启发。
