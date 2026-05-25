@@ -11,7 +11,7 @@ BAD_ADDRESS_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"[\u4e00-\u9fffA-Za-z·・ー]{1,16}君", "kun_transliteration"),
     (r"[\u4e00-\u9fffA-Za-z·・ー]{0,16}(?:さん|くん|ちゃん|さま)", "japanese_honorific_residual"),
 )
-IGNORED_KUN_MATCH_SUFFIXES = ("夫君", "郎君", "诸君")
+IGNORED_KUN_MATCH_SUFFIXES = ("夫君", "郎君", "诸君", "主君")
 IGNORED_CHAN_MATCH_SUFFIXES = ("辣酱", "甜酱", "果酱", "豆瓣酱", "肉酱", "调味酱")
 
 SOURCE_HONORIFIC_PATTERN = re.compile(r"([\u30A1-\u30FA\u30FC一-龥A-Za-z·・ー]{1,24})(さん|くん|君|ちゃん|さま|様|殿|先生|先輩|後輩|氏)")
