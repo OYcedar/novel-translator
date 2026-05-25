@@ -851,6 +851,17 @@ def test_quality_report_allows_native_chinese_lord_address(tmp_path: Path) -> No
     assert report["summary"]["person_address_issue"] == 0
 
 
+def test_quality_report_allows_chinese_monarch_word(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("国主は頭を下げた。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "一国之主不会轻易低头，对同为君主的人尚且如此。"
+
+    report = quality_report(book, _quality_config(), [])
+
+    assert report["summary"]["person_address_issue"] == 0
+
+
 def test_quality_report_allows_common_chinese_sauce_and_carbonated_words(tmp_path: Path) -> None:
     source = tmp_path / "novel.txt"
     source.write_text("炭酸入り果実水を飲む。甘辛のタレで味付けした。", encoding="utf-8")

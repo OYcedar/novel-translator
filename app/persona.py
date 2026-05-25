@@ -60,6 +60,8 @@ def _target_bad_address_match(target: str) -> tuple[str, str] | None:
 def _is_ignored_address_match(code: str, value: str, full_text: str, match_end: int) -> bool:
     if code == "kun_transliteration" and value.endswith(IGNORED_KUN_MATCH_SUFFIXES):
         return True
+    if code == "kun_transliteration" and full_text[match_end : match_end + 1] == "主":
+        return True
     if code == "chan_transliteration" and value.endswith(IGNORED_CHAN_MATCH_SUFFIXES):
         return True
     if code == "tan_transliteration" and full_text[match_end : match_end + 1] == "酸":
