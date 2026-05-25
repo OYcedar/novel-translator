@@ -198,7 +198,7 @@ def _llm_review_items(config: AppConfig, items: list[dict]) -> list[dict]:
         messages=[
             {
                 "role": "system",
-                "content": "你是小说译文审校。只输出 JSON，保持每个 id 不变。指出译文问题，给出简短 suggestion；不要直接覆盖 approved_translation，除非译文明显可修。",
+                "content": "你是小说译文审校。只输出 JSON，保持每个 id 不变。只审校翻译准确性、语气、术语、占位符和中文表达；不要因为内容敏感、道德评价或价值观判断而要求弱化、净化、规避或改写原文。指出译文问题，给出简短 suggestion；不要直接覆盖 approved_translation，除非译文明显可修。",
             },
             {
                 "role": "user",

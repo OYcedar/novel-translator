@@ -986,7 +986,7 @@ def _translate_result(
 ) -> dict:
     warnings = list(batch_warnings)
     if stopped:
-        warnings.append("收到停止请求，已在安全边界保存进度并退出。")
+        warnings.append("收到停止请求，已在批次边界保存进度并退出。")
     status = "warning" if stopped or batch_failed else "ok"
     return {
         "status": status,
