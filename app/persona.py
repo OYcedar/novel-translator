@@ -12,6 +12,7 @@ BAD_ADDRESS_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"[\u4e00-\u9fffA-Za-z·・ー]{0,16}(?:さん|くん|ちゃん|さま)", "japanese_honorific_residual"),
 )
 IGNORED_KUN_MATCH_SUFFIXES = ("夫君", "郎君", "诸君")
+IGNORED_CHAN_MATCH_SUFFIXES = ("辣酱", "甜酱", "果酱", "豆瓣酱", "肉酱", "调味酱")
 
 SOURCE_HONORIFIC_PATTERN = re.compile(r"([\u30A1-\u30FA\u30FC一-龥A-Za-z·・ー]{1,24})(さん|くん|君|ちゃん|さま|様|殿|先生|先輩|後輩|氏)")
 TARGET_BAD_ADDRESS_RE = re.compile("|".join(f"(?:{pattern})" for pattern, _ in BAD_ADDRESS_PATTERNS))
@@ -22,9 +23,11 @@ def person_address_issues(source: str, translated: str) -> list[dict[str, str]]:
     if not translated:
         return issues
     for pattern, code in BAD_ADDRESS_PATTERNS:
-        match = re.search(pattern, translated)
-        if match and not _is_ignored_address_match(code, match.group(0)):
+        for match in re.finditer(pattern, translated):
+            if _is_ignored_address_match(code, match.group(0), translated, match.end()):
+                continue
             issues.append({"code": code, "match": match.group(0), "suggestion": suggestion_for_code(code)})
+            break
     if SOURCE_HONORIFIC_PATTERN.search(source) and not issues:
         for value in ("桑", "酱", "さん", "くん", "ちゃん", "さま"):
             if value in translated:
@@ -47,14 +50,21 @@ def terminology_address_warnings(terms: list[Any]) -> list[str]:
 
 def _target_bad_address_match(target: str) -> tuple[str, str] | None:
     for pattern, code in BAD_ADDRESS_PATTERNS:
-        match = re.search(pattern, target)
-        if match and not _is_ignored_address_match(code, match.group(0)):
+        for match in re.finditer(pattern, target):
+            if _is_ignored_address_match(code, match.group(0), target, match.end()):
+                continue
             return code, match.group(0)
     return None
 
 
-def _is_ignored_address_match(code: str, value: str) -> bool:
-    return code == "kun_transliteration" and value.endswith(IGNORED_KUN_MATCH_SUFFIXES)
+def _is_ignored_address_match(code: str, value: str, full_text: str, match_end: int) -> bool:
+    if code == "kun_transliteration" and value.endswith(IGNORED_KUN_MATCH_SUFFIXES):
+        return True
+    if code == "chan_transliteration" and value.endswith(IGNORED_CHAN_MATCH_SUFFIXES):
+        return True
+    if code == "tan_transliteration" and full_text[match_end : match_end + 1] == "酸":
+        return True
+    return False
 
 
 def suggestion_for_code(code: str) -> str:
