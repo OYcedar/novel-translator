@@ -826,6 +826,20 @@ def test_quality_report_flags_person_address_issues(tmp_path: Path) -> None:
     assert {item["id"] for item in report["details"]["person_address_issue"]} == {book.paragraphs[0].id, book.paragraphs[1].id}
 
 
+def test_quality_report_allows_native_chinese_spouse_address(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("旦那様は振り返った。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "夫君回过头。"
+
+    report = quality_report(book, _quality_config(), [])
+    errors, warnings = validate_terms([Term(source="旦那様", target="夫君", category="address")])
+
+    assert report["summary"]["person_address_issue"] == 0
+    assert errors == []
+    assert warnings == []
+
+
 def test_review_translations_and_apply_fixes(tmp_path: Path) -> None:
     source = tmp_path / "novel.txt"
     source.write_text('Hello {name}.\n\n"Hi," Alice said.', encoding="utf-8")

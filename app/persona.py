@@ -11,6 +11,7 @@ BAD_ADDRESS_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"[\u4e00-\u9fffA-Za-z·・ー]{1,16}君", "kun_transliteration"),
     (r"[\u4e00-\u9fffA-Za-z·・ー]{0,16}(?:さん|くん|ちゃん|さま)", "japanese_honorific_residual"),
 )
+IGNORED_KUN_MATCH_SUFFIXES = ("夫君", "郎君", "诸君")
 
 SOURCE_HONORIFIC_PATTERN = re.compile(r"([\u30A1-\u30FA\u30FC一-龥A-Za-z·・ー]{1,24})(さん|くん|君|ちゃん|さま|様|殿|先生|先輩|後輩|氏)")
 TARGET_BAD_ADDRESS_RE = re.compile("|".join(f"(?:{pattern})" for pattern, _ in BAD_ADDRESS_PATTERNS))
@@ -22,7 +23,7 @@ def person_address_issues(source: str, translated: str) -> list[dict[str, str]]:
         return issues
     for pattern, code in BAD_ADDRESS_PATTERNS:
         match = re.search(pattern, translated)
-        if match:
+        if match and not _is_ignored_address_match(code, match.group(0)):
             issues.append({"code": code, "match": match.group(0), "suggestion": suggestion_for_code(code)})
     if SOURCE_HONORIFIC_PATTERN.search(source) and not issues:
         for value in ("桑", "酱", "さん", "くん", "ちゃん", "さま"):
@@ -35,12 +36,25 @@ def person_address_issues(source: str, translated: str) -> list[dict[str, str]]:
 def terminology_address_warnings(terms: list[Any]) -> list[str]:
     warnings: list[str] = []
     for term in terms:
-        if term.target and TARGET_BAD_ADDRESS_RE.search(term.target):
+        target_issue = _target_bad_address_match(term.target) if term.target else None
+        if target_issue:
             warnings.append(f"术语 {term.source} 的译名 {term.target} 疑似残留日式敬称音译，请改为中文称呼或去掉敬称")
         if SOURCE_HONORIFIC_PATTERN.search(term.source) and term.target and term.source != term.target:
             if any(value in term.target for value in ("桑", "酱", "さん", "くん", "ちゃん", "さま")):
                 warnings.append(f"术语 {term.source} 的译名 {term.target} 保留了日式敬称，请按人物关系处理称呼")
     return warnings
+
+
+def _target_bad_address_match(target: str) -> tuple[str, str] | None:
+    for pattern, code in BAD_ADDRESS_PATTERNS:
+        match = re.search(pattern, target)
+        if match and not _is_ignored_address_match(code, match.group(0)):
+            return code, match.group(0)
+    return None
+
+
+def _is_ignored_address_match(code: str, value: str) -> bool:
+    return code == "kun_transliteration" and value.endswith(IGNORED_KUN_MATCH_SUFFIXES)
 
 
 def suggestion_for_code(code: str) -> str:
