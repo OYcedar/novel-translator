@@ -5,6 +5,7 @@ import re
 from app.config import QualityConfig
 from app.models import Book
 from app.placeholders import placeholder_mismatches
+from app.persona import person_address_issues
 from app.terminology import Term, relevant_terms_for_text
 
 
@@ -17,6 +18,7 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
     style_inconsistency = []
     dialogue_punctuation = []
     over_literal_translation = []
+    person_address_issue = []
     review_required = []
     patterns = [re.compile(pattern) for pattern in config.source_residual_patterns]
     glossary = terms or []
@@ -57,14 +59,17 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             dialogue_punctuation.append({"id": paragraph.id, "text": paragraph.translated})
         if _over_literal_issue(paragraph.source, paragraph.translated):
             over_literal_translation.append({"id": paragraph.id, "text": paragraph.translated})
+        address_issues = person_address_issues(paragraph.source, paragraph.translated)
+        if address_issues:
+            person_address_issue.append({"id": paragraph.id, "issues": address_issues, "text": paragraph.translated})
         if _style_issue(paragraph.translated):
             style_inconsistency.append({"id": paragraph.id, "text": paragraph.translated})
     review_ids = set()
-    for collection in (residual, terminology_mismatch, placeholder_mismatch, epub_markup_risk, style_inconsistency, dialogue_punctuation, over_literal_translation):
+    for collection in (residual, terminology_mismatch, placeholder_mismatch, epub_markup_risk, style_inconsistency, dialogue_punctuation, over_literal_translation, person_address_issue):
         for item in collection:
             review_ids.add(item["id"])
     review_required = sorted(review_ids)
-    status = "ok" if not untranslated and not residual and not terminology_mismatch and not placeholder_mismatch and not epub_markup_risk and not style_inconsistency and not dialogue_punctuation and not over_literal_translation else "warning"
+    status = "ok" if not untranslated and not residual and not terminology_mismatch and not placeholder_mismatch and not epub_markup_risk and not style_inconsistency and not dialogue_punctuation and not over_literal_translation and not person_address_issue else "warning"
     return {
         "status": status,
         "warnings": [],
@@ -80,6 +85,7 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             "style_inconsistency": len(style_inconsistency),
             "dialogue_punctuation": len(dialogue_punctuation),
             "over_literal_translation": len(over_literal_translation),
+            "person_address_issue": len(person_address_issue),
             "review_required": len(review_required),
         },
         "details": {
@@ -91,6 +97,7 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             "style_inconsistency": style_inconsistency[:100],
             "dialogue_punctuation": dialogue_punctuation[:100],
             "over_literal_translation": over_literal_translation[:100],
+            "person_address_issue": person_address_issue[:100],
             "review_required": review_required[:100],
         },
     }

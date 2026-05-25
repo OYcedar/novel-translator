@@ -15,11 +15,12 @@ from app.manual import export_pending_translations, import_manual_translations, 
 from app.memory import export_memory, import_memory, load_memory, lookup_memory, remember_translation, terminology_hash
 from app.models import Paragraph, load_book, save_book
 from app.placeholders import extract_placeholders, placeholder_mismatches
+from app.quality import quality_report
 from app.review import apply_review_fixes, review_translations
 from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, run_report
 from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
 from app.task_control import clear_stop, request_stop, stop_requested, task_status
-from app.terminology import Term, extract_term_candidates
+from app.terminology import Term, extract_term_candidates, validate_terms
 from app.translator import validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
@@ -800,6 +801,29 @@ def test_analysis_and_translation_plan_report_risks(tmp_path: Path) -> None:
     assert analysis["summary"]["duplicate_group_count"] == 1
     assert analysis["details"]["dialogue_ratio"] > 0
     assert plan["summary"]["needs_terminology"] is True
+
+
+def test_validate_terms_warns_on_honorific_transliteration() -> None:
+    terms = [Term(source="ミーリスさん", target="米莉丝桑", category="name")]
+
+    errors, warnings = validate_terms(terms)
+
+    assert errors == []
+    assert any("日式敬称" in warning or "敬称音译" in warning for warning in warnings)
+
+
+def test_quality_report_flags_person_address_issues(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("ミーリスさんは笑った。\n\nレンカちゃんも頷いた。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "米莉丝桑笑了。"
+    book.paragraphs[1].translated = "莲华酱也点了点头。"
+
+    report = quality_report(book, _quality_config(), [])
+
+    assert report["summary"]["person_address_issue"] == 2
+    assert report["summary"]["review_required"] == 2
+    assert {item["id"] for item in report["details"]["person_address_issue"]} == {book.paragraphs[0].id, book.paragraphs[1].id}
 
 
 def test_review_translations_and_apply_fixes(tmp_path: Path) -> None:

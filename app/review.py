@@ -134,7 +134,7 @@ def _select_review_paragraphs(book: Book, quality: dict, mode: str, config: Revi
             selected.extend(chapter_translated[::step] or chapter_translated[:1])
         return selected
     ids = set()
-    for key in ("source_residual", "terminology_mismatch", "placeholder_mismatch", "epub_markup_risk", "style_inconsistency", "dialogue_punctuation", "over_literal_translation", "review_required"):
+    for key in ("source_residual", "terminology_mismatch", "placeholder_mismatch", "epub_markup_risk", "style_inconsistency", "dialogue_punctuation", "over_literal_translation", "person_address_issue", "review_required"):
         for item in quality.get("details", {}).get(key, []):
             if isinstance(item, str):
                 ids.add(item)
@@ -183,6 +183,8 @@ def _suggestion_for_issues(issues: list[str]) -> str:
         return "检查对话引号和句末标点是否符合中文小说习惯。"
     if "over_literal_translation" in issues:
         return "调整直译表达，使中文更自然。"
+    if "person_address_issue" in issues:
+        return "检查人物称呼和敬称处理，避免把 さん/ちゃん 等直译成“桑/酱”，按人物关系改为中文称呼或省略。"
     return "人工复核译文准确性、语气和上下文连续性。"
 
 

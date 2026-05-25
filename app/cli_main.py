@@ -1072,7 +1072,7 @@ def _configured_dir(root: Path, explicit: Path | None, configured: str) -> Path:
 
 def _quality_target_ids(quality: dict) -> set[str]:
     ids: set[str] = set()
-    for key in ("source_residual", "terminology_mismatch", "placeholder_mismatch", "style_inconsistency", "dialogue_punctuation", "over_literal_translation", "review_required"):
+    for key in ("source_residual", "terminology_mismatch", "placeholder_mismatch", "style_inconsistency", "dialogue_punctuation", "over_literal_translation", "person_address_issue", "review_required"):
         for item in quality.get("details", {}).get(key, []):
             if isinstance(item, str):
                 ids.add(item)
