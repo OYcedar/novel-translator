@@ -235,7 +235,10 @@ def verify_delivery(manifest_path: Path) -> dict:
     if not isinstance(files, dict) or not files:
         errors.append({"code": "files_missing", "message": "delivery-manifest.json 缺少 files 校验清单"})
     for key, record in files.items():
-        path = _manifest_record_path(manifest_path, record)
+        path, path_source, path_error = _manifest_record_path(manifest_path, record)
+        if path_error:
+            errors.append({"code": "unsafe_relative_path", "message": f"{key}: {path_error}"})
+            continue
         if not path.exists():
             errors.append({"code": "file_missing", "message": f"{key}: {path} 不存在"})
             continue
@@ -245,7 +248,7 @@ def verify_delivery(manifest_path: Path) -> dict:
         if actual["bytes"] != record.get("bytes"):
             errors.append({"code": "size_mismatch", "message": f"{key}: 文件大小不匹配"})
         if not any(item["message"].startswith(f"{key}:") for item in errors):
-            verified.append({"name": key, **actual})
+            verified.append({"name": key, "path_source": path_source, **actual})
     return {
         "status": "error" if errors else "ok",
         "warnings": [],
@@ -262,8 +265,13 @@ def verify_delivery(manifest_path: Path) -> dict:
     }
 
 
-def _manifest_record_path(manifest_path: Path, record: dict) -> Path:
+def _manifest_record_path(manifest_path: Path, record: dict) -> tuple[Path, str, str]:
     relative_path = str(record.get("relative_path", "")).strip()
     if relative_path:
-        return manifest_path.parent / relative_path
-    return Path(str(record.get("path", "")))
+        candidate = manifest_path.parent / relative_path
+        try:
+            candidate.resolve().relative_to(manifest_path.parent.resolve())
+        except ValueError:
+            return candidate, "relative_path", f"relative_path 超出交付目录：{relative_path}"
+        return candidate, "relative_path", ""
+    return Path(str(record.get("path", ""))), "path", ""

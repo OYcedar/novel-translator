@@ -169,7 +169,7 @@ python3 main.py --agent-mode verify-delivery --manifest ./delivery/delivery-mani
 | `python3 main.py --agent-mode export-epub-risk-report --book <书籍ID> --output ./epub-risk.md --json` | 导出 EPUB 标记风险报告，发布前用于人工复核。 |
 | `python3 main.py --agent-mode run-pipeline --book <书籍ID> --json` | 执行快照、分析、计划、上下文、翻译、重试、质量和审校流水线。 |
 | `python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --format epub --json` | 生成交付包，包含译本、交付门槛报告、质量报告、运行报告、术语和元数据；`--format` 省略时跟随源书格式。 |
-| `python3 main.py --agent-mode verify-delivery --manifest ./delivery/delivery-manifest.json --json` | 校验交付包 manifest 中记录的文件大小和 SHA256，确认交付文件未被改动。 |
+| `python3 main.py --agent-mode verify-delivery --manifest ./delivery/delivery-manifest.json --json` | 校验交付包 manifest 中记录的相对路径、文件大小和 SHA256，确认交付文件未被改动。 |
 | `python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json` | 导出前检查；最终交付不能有 error。 |
 | `python3 main.py --agent-mode delivery-check --book <书籍ID> --format epub --json` | 聚合最终交付门槛，检查待译段落、失败批次、占位符、质量报告和导出风险。 |
 | `python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json` | 导出 TXT 译本。 |

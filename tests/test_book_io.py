@@ -925,7 +925,51 @@ def test_verify_delivery_uses_relative_paths_after_moving_package(tmp_path: Path
 
     assert verification["status"] == "ok"
     assert verification["summary"]["verified"] > 0
+    assert {item["path_source"] for item in verification["details"]["verified"]} == {"relative_path"}
     assert all(str(moved) in item["path"] for item in verification["details"]["verified"])
+
+
+def test_verify_delivery_supports_legacy_absolute_manifest_paths(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.", encoding="utf-8")
+    book = load_txt_book(source, title="LegacyDelivery")
+    config = _app_config(tmp_path)
+    save_book(config.books_dir, book, source)
+    book.paragraphs[0].translated = "一。"
+    from app.models import persist_book
+
+    persist_book(config.books_dir, book)
+    package = package_delivery(config.books_dir, book, [], _quality_config(), EpubConfig(), tmp_path / "legacy-delivery")
+    manifest_path = Path(package["summary"]["manifest"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for record in manifest["files"].values():
+        record.pop("relative_path", None)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    verification = verify_delivery(manifest_path)
+
+    assert verification["status"] == "ok"
+    assert {item["path_source"] for item in verification["details"]["verified"]} == {"path"}
+
+
+def test_verify_delivery_rejects_relative_paths_outside_package(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.", encoding="utf-8")
+    book = load_txt_book(source, title="UnsafeDelivery")
+    config = _app_config(tmp_path)
+    save_book(config.books_dir, book, source)
+    book.paragraphs[0].translated = "一。"
+    from app.models import persist_book
+
+    persist_book(config.books_dir, book)
+    package = package_delivery(config.books_dir, book, [], _quality_config(), EpubConfig(), tmp_path / "unsafe-delivery")
+    manifest_path = Path(package["summary"]["manifest"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["translated"]["relative_path"] = "../outside.txt"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    verification = verify_delivery(manifest_path)
+
+    assert verification["status"] == "error"
+    assert "unsafe_relative_path" in {item["code"] for item in verification["errors"]}
 
 
 def test_verify_delivery_detects_file_tampering(tmp_path: Path) -> None:
