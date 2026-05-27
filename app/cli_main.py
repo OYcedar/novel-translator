@@ -302,6 +302,10 @@ def build_parser() -> argparse.ArgumentParser:
     restore_snapshot_cmd.add_argument("--book", required=True)
     restore_snapshot_cmd.add_argument("--snapshot", required=True)
 
+    delivery_check = add_common(subparsers.add_parser("delivery-check", help="检查单本小说是否满足交付门槛"), json_flag=True)
+    delivery_check.add_argument("--book", required=True)
+    delivery_check.add_argument("--format", choices=["txt", "epub"], required=True)
+
     delivery = add_common(subparsers.add_parser("package-delivery", help="生成交付包"), json_flag=True)
     delivery.add_argument("--book", required=True)
     delivery.add_argument("--output-dir", type=Path, required=True)
@@ -483,6 +487,8 @@ def dispatch(args: argparse.Namespace) -> dict:
         return list_snapshots(config.books_dir, args.book)
     if args.command == "restore-snapshot":
         return restore_snapshot(config.books_dir, args.book, args.snapshot)
+    if args.command == "delivery-check":
+        return delivery_check(config, args)
     if args.command == "package-delivery":
         book = load_book(config.books_dir, args.book)
         return package_delivery(config.books_dir, book, load_terms(config.books_dir, book.id), config.quality, config.epub, args.output_dir.expanduser().resolve(), bilingual=resolve_bilingual(config, args))
@@ -1814,6 +1820,76 @@ def validate_export(config: AppConfig, args: argparse.Namespace) -> dict:
             "epub_markup_risk": quality["summary"].get("epub_markup_risk", 0),
         },
         "details": {"quality": quality},
+    }
+
+
+def delivery_check(config: AppConfig, args: argparse.Namespace) -> dict:
+    book = load_book(config.books_dir, args.book)
+    terms = load_terms(config.books_dir, book.id)
+    pending_ids = _pending_id_set(book)
+    translation = translation_status(config, book.id)
+    runs = run_report(config.books_dir, book.id, pending_ids)
+    quality = quality_report(book, config.quality, terms)
+    export_validation = validate_export(config, args)
+    errors = []
+    warnings = []
+    if translation["summary"].get("pending", 0):
+        errors.append(
+            {
+                "code": "pending_translations",
+                "message": f"还有 {translation['summary']['pending']} 个段落未翻译",
+            }
+        )
+    if runs["summary"].get("failed", 0):
+        errors.append(
+            {
+                "code": "failed_batches",
+                "message": f"仍有 {runs['summary']['failed']} 个失败批次未恢复",
+            }
+        )
+    if quality["summary"].get("placeholder_mismatch", 0):
+        errors.append(
+            {
+                "code": "placeholder_mismatch",
+                "message": f"存在 {quality['summary']['placeholder_mismatch']} 个占位符缺失问题",
+            }
+        )
+    errors.extend(
+        item
+        for item in export_validation.get("errors", [])
+        if item.get("code") != "export_pending_translations"
+    )
+    if quality["status"] != "ok":
+        warnings.append("quality-report 仍有 warning，交付前需要修复或在交付说明中解释。")
+    warnings.extend(export_validation.get("warnings", []))
+    if runs["status"] == "warning" and not runs["summary"].get("failed", 0):
+        warnings.extend(runs.get("warnings", []))
+    status = "error" if errors else ("warning" if warnings else "ok")
+    steps = [
+        {"step": "translation-status", "status": translation["status"], "summary": translation["summary"]},
+        {"step": "run-report", "status": runs["status"], "summary": runs["summary"]},
+        {"step": "quality-report", "status": quality["status"], "summary": quality["summary"]},
+        {"step": "validate-export", "status": export_validation["status"], "summary": export_validation["summary"]},
+    ]
+    return {
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
+        "summary": {
+            "book": book.id,
+            "format": args.format,
+            "ready": status == "ok",
+            "pending": translation["summary"].get("pending", 0),
+            "failed_batches": runs["summary"].get("failed", 0),
+            "placeholder_mismatch": quality["summary"].get("placeholder_mismatch", 0),
+            "quality_status": quality["status"],
+            "export_status": export_validation["status"],
+        },
+        "details": {
+            "steps": steps,
+            "blockers": errors,
+            "quality": quality,
+        },
     }
 
 

@@ -8,7 +8,7 @@ import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
-from app.cli_main import build_parser, check, command_catalog, doctor, retry_failed, run_folder, secret_scan, self_test
+from app.cli_main import build_parser, check, command_catalog, delivery_check, doctor, retry_failed, run_folder, secret_scan, self_test
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -847,6 +847,45 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert restore["summary"]["snapshot"] == snapshot["summary"]["snapshot_id"]
     assert (tmp_path / "delivery" / "delivery-manifest.json").exists()
     assert package["summary"]["output_dir"].endswith("delivery")
+
+
+def test_delivery_check_reports_ready_book(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.\n\nTwo.", encoding="utf-8")
+    book = load_txt_book(source, title="Ready")
+    config = _app_config(tmp_path)
+    books_dir = config.books_dir
+    save_book(books_dir, book, source)
+    for paragraph in book.paragraphs:
+        paragraph.translated = f"译文{paragraph.id}"
+    from app.models import persist_book
+
+    persist_book(books_dir, book)
+    report = delivery_check(config, argparse.Namespace(book=book.id, format="txt"))
+
+    assert report["status"] == "ok"
+    assert report["summary"]["ready"] is True
+    assert report["summary"]["pending"] == 0
+    assert report["summary"]["failed_batches"] == 0
+
+
+def test_delivery_check_blocks_pending_and_placeholder_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("Hello {name}.\n\nTwo.", encoding="utf-8")
+    book = load_txt_book(source, title="Blocked")
+    config = _app_config(tmp_path)
+    books_dir = config.books_dir
+    save_book(books_dir, book, source)
+    book.paragraphs[0].translated = "你好。"
+    from app.models import persist_book
+
+    persist_book(books_dir, book)
+    report = delivery_check(config, argparse.Namespace(book=book.id, format="txt"))
+    codes = {item["code"] for item in report["errors"]}
+
+    assert report["status"] == "error"
+    assert report["summary"]["ready"] is False
+    assert {"pending_translations", "placeholder_mismatch"} <= codes
 
 
 def test_run_folder_dry_run_scans_without_registering(tmp_path: Path) -> None:

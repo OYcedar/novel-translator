@@ -109,6 +109,7 @@ python3 main.py --agent-mode quality-report --book <书籍ID> --json
 
 ```bash
 python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json
+python3 main.py --agent-mode delivery-check --book <书籍ID> --format epub --json
 python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json
 python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json
 ```
@@ -165,6 +166,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 | `python3 main.py --agent-mode run-pipeline --book <书籍ID> --json` | 执行快照、分析、计划、上下文、翻译、重试、质量和审校流水线。 |
 | `python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --json` | 生成交付包，包含译本、质量报告、运行报告、术语和元数据。 |
 | `python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json` | 导出前检查；最终交付不能有 error。 |
+| `python3 main.py --agent-mode delivery-check --book <书籍ID> --format epub --json` | 聚合最终交付门槛，检查待译段落、失败批次、占位符、质量报告和导出风险。 |
 | `python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json` | 导出 TXT 译本。 |
 | `python3 main.py --agent-mode export --book <书籍ID> --format epub --output ./translated.epub --json` | 导出 EPUB 译本；仅 EPUB 源书可用。 |
 
@@ -347,6 +349,7 @@ python3 main.py --agent-mode export-review-report --book <书籍ID> --review-id 
 
 交付前硬门槛：
 
+- `delivery-check` 不能是 `error`，且 `summary.ready` 必须为 `true`。
 - `validate-export` 不能是 `error`。
 - `run-report.summary.failed` 必须为 0。
 - `quality-report.summary.placeholder_mismatch` 必须为 0。

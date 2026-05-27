@@ -97,6 +97,7 @@ python3 main.py --agent-mode <命令> ...
 | `export --book <书籍ID> --format txt --output <文件> --bilingual --json` | 导出双语 TXT | 输出文件包含原文和译文 | 仅用于校对，不一定适合发布 |
 | `export --book <书籍ID> --format epub --output <文件> --json` | 导出 EPUB 译本 | 源书为 EPUB 且输出文件存在 | TXT 书不能导出 EPUB；复杂排版需人工复核 |
 | `validate-export --book <书籍ID> --format txt|epub --json` | 导出前检查 pending、质量和 EPUB 标记风险 | 最终交付前应为 `ok` | warning 需要解释；error 必须修复 |
+| `delivery-check --book <书籍ID> --format txt|epub --json` | 聚合交付门槛，检查待译、失败批次、占位符、质量和导出风险 | `status` 为 `ok` 且 `summary.ready=true` | 按 `details.blockers` 先修阻断项 |
 | `export-epub-risk-report --book <书籍ID> --output <报告.md> --json` | 导出 EPUB 标记风险报告 | EPUB 风险段落数量可解释 | EPUB 有风险时交付包必须包含 |
 | `package-delivery --book <书籍ID> --output-dir <目录> --json` | 生成译本、质量报告、运行报告、术语和元数据交付包 | 目录含 delivery-manifest.json | warning 必须在交付说明中解释 |
 
