@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
+    add_common(subparsers.add_parser("check", help="运行项目聚合质量门禁"), json_flag=True)
     add_common(subparsers.add_parser("commands", help="列出当前 CLI 命令能力"), json_flag=True)
     add_common(subparsers.add_parser("self-test", help="运行内置 TXT/EPUB 冒烟测试"), json_flag=True)
     add_common(subparsers.add_parser("secret-scan", help="扫描已跟踪文件中的敏感信息"), json_flag=True)
@@ -340,6 +341,8 @@ def resolve_bilingual(config: AppConfig, args: argparse.Namespace) -> bool:
 def dispatch(args: argparse.Namespace) -> dict:
     if args.command == "doctor":
         return doctor(args)
+    if args.command == "check":
+        return check(args)
     if args.command == "commands":
         return command_catalog()
     if args.command == "self-test":
@@ -624,6 +627,52 @@ def command_catalog() -> dict:
         "warnings": [],
         "summary": {"commands": len(commands)},
         "details": {"commands": commands},
+    }
+
+
+def check(args: argparse.Namespace) -> dict:
+    step_reports = [
+        ("doctor", doctor(args)),
+        ("commands", command_catalog()),
+        ("self-test", self_test()),
+        ("secret-scan", secret_scan()),
+    ]
+    steps = []
+    warnings = []
+    errors = []
+    for name, report in step_reports:
+        step_warnings = report.get("warnings", [])
+        step_errors = report.get("errors", [])
+        warnings.extend(f"{name}: {item}" for item in step_warnings)
+        errors.extend(
+            {
+                "step": name,
+                "code": item.get("code", "error") if isinstance(item, dict) else "error",
+                "message": item.get("message", str(item)) if isinstance(item, dict) else str(item),
+            }
+            for item in step_errors
+        )
+        steps.append(
+            {
+                "step": name,
+                "status": report.get("status", "error"),
+                "summary": report.get("summary", {}),
+            }
+        )
+    status = "error" if errors or any(step["status"] == "error" for step in steps) else (
+        "warning" if warnings or any(step["status"] == "warning" for step in steps) else "ok"
+    )
+    return {
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
+        "summary": {
+            "steps": len(steps),
+            "passed": sum(1 for step in steps if step["status"] == "ok"),
+            "warnings": len(warnings),
+            "errors": len(errors),
+        },
+        "details": {"steps": steps},
     }
 
 

@@ -33,14 +33,8 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall app tests
 
-      - name: Check CLI command catalog
-        run: python main.py --agent-mode commands --json
-
-      - name: Run built-in smoke self-test
-        run: python main.py --agent-mode self-test --json
-
-      - name: Scan tracked files for secrets
-        run: python main.py --agent-mode secret-scan --json
+      - name: Run aggregate project check
+        run: python main.py --agent-mode check --json
 
       - name: Run tests
         run: python -m pytest -q

@@ -59,10 +59,7 @@ timeout = 600
 先检查环境：
 
 ```bash
-python3 main.py --agent-mode doctor --json
-python3 main.py --agent-mode commands --json
-python3 main.py --agent-mode self-test --json
-python3 main.py --agent-mode secret-scan --json
+python3 main.py --agent-mode check --json
 ```
 
 ### 2. 注册小说
@@ -128,6 +125,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 
 | 命令 | 备注 |
 | --- | --- |
+| `python3 main.py --agent-mode check --json` | 一次运行项目聚合质量门禁，包含健康检查、命令清单、内置自测和敏感信息扫描。 |
 | `python3 main.py --agent-mode doctor --json` | 输出项目健康报告，检查配置、LLM 字段、Python 版本、CI、Skill、命令数量和可选依赖。 |
 | `python3 main.py --agent-mode commands --json` | 输出机器可读 CLI 命令清单，便于 Agent 自查当前能力。 |
 | `python3 main.py --agent-mode self-test --json` | 运行内置 TXT/EPUB 冒烟测试，不需要模型或外部小说样本。 |
@@ -185,7 +183,7 @@ skills/novel-translator/SKILL.md
 
 如果交给 Codex、Claude Code 或其他 Agent 执行整本翻译，让它读取这个 Skill，并按其中的命令契约完成术语、翻译、质量检查和导出流程。本仓库只提供 Skill 文件，不会自动安装到本机 Codex。
 
-1. `doctor --json` 检查配置。
+1. `check --json` 运行聚合质量门禁；如需定位问题，再单独运行 `doctor --json`、`commands --json`、`self-test --json` 或 `secret-scan --json`。
 2. `add-book --path <小说文件> --json` 注册小说，记录返回的书籍 ID。
 3. `text-scope --book <书籍ID> --json` 确认章节和段落数量。
 4. `analyze-book --book <书籍ID> --json` 生成译前项目画像，检查对话比例、重复文本、术语密度和 EPUB 风险。
@@ -409,9 +407,7 @@ EPUB 导出会复制原始 EPUB，保留 CSS、图片和元数据，并替换 sp
 ```bash
 python3 -m pip install -e ".[dev,epub]"
 python3 -m compileall app tests
-python3 main.py --agent-mode commands --json
-python3 main.py --agent-mode self-test --json
-python3 main.py --agent-mode secret-scan --json
+python3 main.py --agent-mode check --json
 python3 -m pytest -q
 python3 -m build
 ```

@@ -8,7 +8,7 @@ import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
-from app.cli_main import build_parser, command_catalog, doctor, retry_failed, run_folder, secret_scan, self_test
+from app.cli_main import build_parser, check, command_catalog, doctor, retry_failed, run_folder, secret_scan, self_test
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -956,7 +956,17 @@ def test_command_catalog_lists_parser_commands() -> None:
     assert report["status"] == "ok"
     assert report["summary"]["commands"] == len(parser_commands)
     assert catalog_commands == parser_commands
-    assert {"doctor", "commands", "translate", "quality-report", "package-delivery"} <= catalog_commands
+    assert {"doctor", "check", "commands", "translate", "quality-report", "package-delivery"} <= catalog_commands
+
+
+def test_check_runs_project_quality_gates() -> None:
+    report = check(argparse.Namespace(config=Path(__file__).resolve().parents[1] / "setting.example.toml"))
+    steps = {item["step"]: item for item in report["details"]["steps"]}
+
+    assert report["status"] in {"ok", "warning"}
+    assert report["summary"]["errors"] == 0
+    assert {"doctor", "commands", "self-test", "secret-scan"} <= set(steps)
+    assert steps["commands"]["summary"]["commands"] == len(_parser_command_names())
 
 
 def test_doctor_reports_project_health_for_valid_config(tmp_path: Path) -> None:
