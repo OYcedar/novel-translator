@@ -228,21 +228,37 @@ def _file_record(path: Path, root: Path | None = None) -> dict:
 
 
 def verify_delivery(manifest_path: Path) -> dict:
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _verify_delivery_error(manifest_path, "manifest_missing", "delivery-manifest.json 不存在")
+    except json.JSONDecodeError as error:
+        return _verify_delivery_error(manifest_path, "manifest_invalid_json", f"delivery-manifest.json 不是有效 JSON：{error}")
+    if not isinstance(manifest, dict):
+        return _verify_delivery_error(manifest_path, "manifest_invalid", "delivery-manifest.json 顶层必须是对象")
     errors = []
     verified = []
     files = manifest.get("files", {})
     if not isinstance(files, dict) or not files:
         errors.append({"code": "files_missing", "message": "delivery-manifest.json 缺少 files 校验清单"})
+        files = {}
     for key, record in files.items():
+        if not isinstance(record, dict):
+            errors.append({"code": "file_record_invalid", "message": f"{key}: 文件记录必须是对象"})
+            continue
         path, path_source, path_error = _manifest_record_path(manifest_path, record)
         if path_error:
-            errors.append({"code": "unsafe_relative_path", "message": f"{key}: {path_error}"})
+            error_code = "unsafe_relative_path" if "超出交付目录" in path_error else "file_path_missing"
+            errors.append({"code": error_code, "message": f"{key}: {path_error}"})
             continue
         if not path.exists():
             errors.append({"code": "file_missing", "message": f"{key}: {path} 不存在"})
             continue
-        actual = _file_record(path)
+        try:
+            actual = _file_record(path)
+        except OSError as error:
+            errors.append({"code": "file_unreadable", "message": f"{key}: 无法读取文件：{error}"})
+            continue
         if actual["sha256"] != record.get("sha256"):
             errors.append({"code": "sha256_mismatch", "message": f"{key}: sha256 不匹配"})
         if actual["bytes"] != record.get("bytes"):
@@ -265,6 +281,16 @@ def verify_delivery(manifest_path: Path) -> dict:
     }
 
 
+def _verify_delivery_error(manifest_path: Path, code: str, message: str) -> dict:
+    return {
+        "status": "error",
+        "warnings": [],
+        "errors": [{"code": code, "message": message}],
+        "summary": {"manifest": str(manifest_path), "book": "", "ready": False, "files": 0, "verified": 0, "errors": 1},
+        "details": {"verified": [], "manifest": {}},
+    }
+
+
 def _manifest_record_path(manifest_path: Path, record: dict) -> tuple[Path, str, str]:
     relative_path = str(record.get("relative_path", "")).strip()
     if relative_path:
@@ -274,4 +300,7 @@ def _manifest_record_path(manifest_path: Path, record: dict) -> tuple[Path, str,
         except ValueError:
             return candidate, "relative_path", f"relative_path 超出交付目录：{relative_path}"
         return candidate, "relative_path", ""
-    return Path(str(record.get("path", ""))), "path", ""
+    absolute_path = str(record.get("path", "")).strip()
+    if not absolute_path:
+        return Path(""), "path", "缺少 path 或 relative_path"
+    return Path(absolute_path), "path", ""

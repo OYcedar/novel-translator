@@ -972,6 +972,40 @@ def test_verify_delivery_rejects_relative_paths_outside_package(tmp_path: Path) 
     assert "unsafe_relative_path" in {item["code"] for item in verification["errors"]}
 
 
+def test_verify_delivery_returns_structured_error_for_invalid_manifest(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "delivery-manifest.json"
+    manifest_path.write_text("{bad json", encoding="utf-8")
+    verification = verify_delivery(manifest_path)
+
+    assert verification["status"] == "error"
+    assert verification["summary"]["errors"] == 1
+    assert verification["errors"][0]["code"] == "manifest_invalid_json"
+
+
+def test_verify_delivery_reports_invalid_file_records(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "delivery-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "book": "bad-records",
+                "ready": True,
+                "files": {
+                    "translated": {"sha256": "x", "bytes": 1},
+                    "quality_report": "not-object",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    verification = verify_delivery(manifest_path)
+    codes = {item["code"] for item in verification["errors"]}
+
+    assert verification["status"] == "error"
+    assert {"file_path_missing", "file_record_invalid"} <= codes
+
+
 def test_verify_delivery_detects_file_tampering(tmp_path: Path) -> None:
     source = tmp_path / "novel.txt"
     source.write_text("One.", encoding="utf-8")

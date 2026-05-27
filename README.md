@@ -121,7 +121,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 python3 main.py --agent-mode verify-delivery --manifest ./delivery/delivery-manifest.json --json
 ```
 
-`delivery` 目录可以移动或压缩后再校验；manifest 同时记录相对路径和 SHA256，适合交付给他人复核。
+`delivery` 目录可以移动或压缩后再校验；manifest 同时记录相对路径和 SHA256，适合交付给他人复核。manifest 损坏、字段缺失、路径越界或文件被改动时，`verify-delivery` 会返回结构化 `error`。
 
 ## 详细说明
 

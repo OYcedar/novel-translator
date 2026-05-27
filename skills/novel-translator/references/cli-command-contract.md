@@ -101,6 +101,6 @@ python3 main.py --agent-mode <命令> ...
 | `delivery-check --book <书籍ID> --format txt|epub --json` | 聚合交付门槛，检查待译、失败批次、占位符、质量和导出风险 | `status` 为 `ok` 且 `summary.ready=true` | 按 `details.blockers` 先修阻断项 |
 | `export-epub-risk-report --book <书籍ID> --output <报告.md> --json` | 导出 EPUB 标记风险报告 | EPUB 风险段落数量可解释 | EPUB 有风险时交付包必须包含 |
 | `package-delivery --book <书籍ID> --output-dir <目录> --format txt|epub --json` | 生成指定格式的译本、交付门槛报告、质量报告、运行报告、术语和元数据交付包 | `status` 为 `ok` 且目录含 delivery-manifest.json 和 reports/delivery-check.json | error 表示交付门槛未过，只能作为排查材料；warning 必须在交付说明中解释；TXT 书不能打 EPUB 包 |
-| `verify-delivery --manifest <目录>/delivery-manifest.json --json` | 校验交付包 manifest 中记录的相对路径、文件大小和 SHA256 | `status` 为 `ok` 且 `summary.errors` 为 0 | error 表示交付文件缺失、被改动或相对路径越界，必须重新生成或更正交付包；交付目录移动后仍应可校验 |
+| `verify-delivery --manifest <目录>/delivery-manifest.json --json` | 校验交付包 manifest 中记录的相对路径、文件大小和 SHA256 | `status` 为 `ok` 且 `summary.errors` 为 0 | error 表示 manifest 损坏、字段缺失、交付文件缺失、被改动或相对路径越界，必须重新生成或更正交付包；交付目录移动后仍应可校验 |
 
 EPUB 导出按导入时保存的 `chapter_path`、`node_index` 和 `text_hash` 回写。遇到节点失效或 hash 不一致时，导出会 warning 并保留原文，不能把这类输出称为最终版。
