@@ -960,13 +960,23 @@ def test_command_catalog_lists_parser_commands() -> None:
 
 
 def test_check_runs_project_quality_gates() -> None:
-    report = check(argparse.Namespace(config=Path(__file__).resolve().parents[1] / "setting.example.toml"))
+    report = check(argparse.Namespace(config=Path(__file__).resolve().parents[1] / "setting.example.toml", strict=False))
     steps = {item["step"]: item for item in report["details"]["steps"]}
 
     assert report["status"] in {"ok", "warning"}
     assert report["summary"]["errors"] == 0
+    assert report["summary"]["strict"] is False
     assert {"doctor", "commands", "self-test", "secret-scan"} <= set(steps)
     assert steps["commands"]["summary"]["commands"] == len(_parser_command_names())
+
+
+def test_check_strict_promotes_warnings_to_errors(tmp_path: Path) -> None:
+    report = check(argparse.Namespace(config=tmp_path / "missing.toml", strict=True))
+
+    assert report["status"] == "error"
+    assert report["summary"]["strict"] is True
+    assert report["summary"]["errors"] == len(report["warnings"])
+    assert {item["code"] for item in report["errors"]} == {"warning_as_error"}
 
 
 def test_doctor_reports_project_health_for_valid_config(tmp_path: Path) -> None:

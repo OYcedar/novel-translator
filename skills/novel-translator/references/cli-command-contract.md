@@ -19,6 +19,7 @@ python3 main.py --agent-mode <命令> ...
 | 命令 | 用途 | 成功判断 | 失败处理 |
 | --- | --- | --- | --- |
 | `check --json` | 运行聚合质量门禁：健康检查、命令清单、内置自测和敏感信息扫描 | `status` 不是 `error` 且 `summary.errors` 为 0 | 按 `details.steps` 定位失败步骤，再单独运行对应命令修复 |
+| `check --strict --json` | 交付前硬门槛，任何 warning 都升级为 error | `status` 为 `ok` | 先处理 Python 版本、模型配置、内置自测或密钥扫描 warning |
 | `doctor --json` | 检查项目根目录、配置文件和 Python 版本 | `status` 不是 `error` | 缺 `setting.toml` 时复制示例并填写；仅 dry-run 可继续 |
 | `commands --json` | 输出当前 CLI 支持的命令、必填参数和 JSON 支持状态 | `details.commands` 可读且包含当前要执行的命令 | 如果文档命令不在清单里，以 `commands` 输出为准并停止使用旧命令 |
 | `self-test --json` | 运行内置 TXT/EPUB 导入、导出和 EPUB 校验冒烟测试 | `status` 为 `ok` 且 `summary.errors` 为 0 | 失败时先修工具本身，不要开始真实翻译 |

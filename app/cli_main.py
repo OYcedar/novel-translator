@@ -86,7 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
-    add_common(subparsers.add_parser("check", help="运行项目聚合质量门禁"), json_flag=True)
+    check_parser = add_common(subparsers.add_parser("check", help="运行项目聚合质量门禁"), json_flag=True)
+    check_parser.add_argument("--strict", action="store_true", help="将 warning 升级为 error，适合发布或交付前硬门槛")
     add_common(subparsers.add_parser("commands", help="列出当前 CLI 命令能力"), json_flag=True)
     add_common(subparsers.add_parser("self-test", help="运行内置 TXT/EPUB 冒烟测试"), json_flag=True)
     add_common(subparsers.add_parser("secret-scan", help="扫描已跟踪文件中的敏感信息"), json_flag=True)
@@ -659,18 +660,27 @@ def check(args: argparse.Namespace) -> dict:
                 "summary": report.get("summary", {}),
             }
         )
-    status = "error" if errors or any(step["status"] == "error" for step in steps) else (
+    strict = bool(getattr(args, "strict", False))
+    strict_errors = []
+    if strict:
+        strict_errors = [
+            {"step": "check", "code": "warning_as_error", "message": item}
+            for item in warnings
+        ]
+    all_errors = errors + strict_errors
+    status = "error" if all_errors or any(step["status"] == "error" for step in steps) else (
         "warning" if warnings or any(step["status"] == "warning" for step in steps) else "ok"
     )
     return {
         "status": status,
         "warnings": warnings,
-        "errors": errors,
+        "errors": all_errors,
         "summary": {
             "steps": len(steps),
             "passed": sum(1 for step in steps if step["status"] == "ok"),
             "warnings": len(warnings),
-            "errors": len(errors),
+            "errors": len(all_errors),
+            "strict": strict,
         },
         "details": {"steps": steps},
     }

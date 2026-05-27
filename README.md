@@ -126,6 +126,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 | 命令 | 备注 |
 | --- | --- |
 | `python3 main.py --agent-mode check --json` | 一次运行项目聚合质量门禁，包含健康检查、命令清单、内置自测和敏感信息扫描。 |
+| `python3 main.py --agent-mode check --strict --json` | 发布或交付前硬门槛，会把任何 warning 升级为 error。 |
 | `python3 main.py --agent-mode doctor --json` | 输出项目健康报告，检查配置、LLM 字段、Python 版本、CI、Skill、命令数量和可选依赖。 |
 | `python3 main.py --agent-mode commands --json` | 输出机器可读 CLI 命令清单，便于 Agent 自查当前能力。 |
 | `python3 main.py --agent-mode self-test --json` | 运行内置 TXT/EPUB 冒烟测试，不需要模型或外部小说样本。 |
@@ -411,6 +412,8 @@ python3 main.py --agent-mode check --json
 python3 -m pytest -q
 python3 -m build
 ```
+
+交付前可以额外运行 `python3 main.py --agent-mode check --strict --json`。严格模式会要求 Python 版本、模型配置、内置自测和敏感信息扫描都没有 warning。
 
 ### 特别感谢
 
