@@ -36,6 +36,9 @@ jobs:
       - name: Check CLI command catalog
         run: python main.py --agent-mode commands --json
 
+      - name: Run built-in smoke self-test
+        run: python main.py --agent-mode self-test --json
+
       - name: Run tests
         run: python -m pytest -q
 

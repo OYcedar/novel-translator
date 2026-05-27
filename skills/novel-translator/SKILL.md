@@ -38,7 +38,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 
 ## 主流程
 
-1. 在 `<项目目录>` 运行 `doctor --json` 和 `commands --json`，确认 CLI、配置状态和当前命令清单。缺 `setting.toml` 时先让用户复制 `setting.example.toml` 并填写模型配置；只做 `--dry-run` 验证时可继续。文档命令和 `commands` 输出不一致时，以 `commands` 为准并停止使用旧命令。
+1. 在 `<项目目录>` 运行 `doctor --json`、`commands --json` 和 `self-test --json`，确认 CLI、配置状态、当前命令清单和内置 TXT/EPUB 闭环可用。缺 `setting.toml` 时先让用户复制 `setting.example.toml` 并填写模型配置；只做 `--dry-run` 验证时可继续。文档命令和 `commands` 输出不一致时，以 `commands` 为准并停止使用旧命令。
 2. 如果源文件是 EPUB，先运行 `inspect-epub --path <小说文件> --json`，查看 spine、nav/toc、重复文本和标记风险。
 3. 运行 `add-book --path <小说文件> --json` 注册小说，记录 `<书籍ID>`。
 4. 运行 `work-records --book <书籍ID> --json` 初始化 `<工作记录目录>`。如果已有外部脚本、日志、术语表或人工文件，使用 `work-records --book <书籍ID> --collect-log-dir <日志目录> --json` 和 `work-records --book <书籍ID> --collect-file <文件> --json` 收纳到该书目录；后续报告优先输出到 `<工作记录目录>/reports/`，交付包优先输出到 `<工作记录目录>/delivery/`。

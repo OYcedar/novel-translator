@@ -20,6 +20,7 @@ python3 main.py --agent-mode <命令> ...
 | --- | --- | --- | --- |
 | `doctor --json` | 检查项目根目录、配置文件和 Python 版本 | `status` 不是 `error` | 缺 `setting.toml` 时复制示例并填写；仅 dry-run 可继续 |
 | `commands --json` | 输出当前 CLI 支持的命令、必填参数和 JSON 支持状态 | `details.commands` 可读且包含当前要执行的命令 | 如果文档命令不在清单里，以 `commands` 输出为准并停止使用旧命令 |
+| `self-test --json` | 运行内置 TXT/EPUB 导入、导出和 EPUB 校验冒烟测试 | `status` 为 `ok` 且 `summary.errors` 为 0 | 失败时先修工具本身，不要开始真实翻译 |
 | `inspect-epub --path <EPUB文件> --json` | 检查 EPUB2/3、OPF、spine、nav/toc、重复文本和标记风险 | `summary.paragraph_count` 可解释 | 坏 HTML 且增强依赖不可用时，安装可选 EPUB 依赖或换源文件 |
 | `add-book --path <小说文件> --json` | 注册 EPUB/TXT 小说 | `summary.book` 可用于后续命令 | 修路径或格式后重跑 |
 | `add-book --path <小说文件> --title <标题> --id <ID> --json` | 用指定标题和 ID 注册小说 | `summary.book` 等于规范化 ID | ID 冲突时确认是否覆盖当前本地缓存 |

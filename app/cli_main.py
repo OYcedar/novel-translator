@@ -6,13 +6,15 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
+import zipfile
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.analysis import analyze_book as analyze_book_report, translation_plan as translation_plan_report
-from app.book_io import export_epub, export_txt, inspect_epub, load_source_book, validate_epub
+from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_source_book, load_txt_book, validate_epub
 from app.config import AppConfig, EpubConfig, load_config
 from app.context import context_status, load_context, summarize_context
 from app.delivery import export_epub_risk_report, package_delivery
@@ -84,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
     add_common(subparsers.add_parser("commands", help="列出当前 CLI 命令能力"), json_flag=True)
+    add_common(subparsers.add_parser("self-test", help="运行内置 TXT/EPUB 冒烟测试"), json_flag=True)
 
     inspect_epub_parser = add_common(subparsers.add_parser("inspect-epub", help="检查 EPUB 内部结构"), json_flag=True)
     inspect_epub_parser.add_argument("--path", type=Path, required=True)
@@ -337,6 +340,8 @@ def dispatch(args: argparse.Namespace) -> dict:
         return doctor(args)
     if args.command == "commands":
         return command_catalog()
+    if args.command == "self-test":
+        return self_test()
     if args.command == "inspect-epub":
         try:
             epub_config = load_config(ROOT, args.config).epub
@@ -615,6 +620,122 @@ def command_catalog() -> dict:
         "summary": {"commands": len(commands)},
         "details": {"commands": commands},
     }
+
+
+def self_test() -> dict:
+    steps = []
+    errors = []
+    warnings = []
+    with tempfile.TemporaryDirectory(prefix="novel-translator-self-test-") as temp:
+        work_dir = Path(temp)
+        try:
+            txt_source = work_dir / "sample.txt"
+            txt_source.write_text("Hello.\n\nWorld.", encoding="utf-8")
+            txt_book = load_txt_book(txt_source, title="sample")
+            txt_book.paragraphs[0].translated = "你好。"
+            txt_book.paragraphs[1].translated = "世界。"
+            txt_output = work_dir / "translated.txt"
+            export_txt(txt_book, txt_output)
+            txt_text = txt_output.read_text(encoding="utf-8")
+            if "你好。" not in txt_text or "世界。" not in txt_text:
+                raise AssertionError("TXT 导出内容缺少译文")
+            steps.append({"step": "txt-import-export", "status": "ok", "summary": {"paragraphs": len(txt_book.paragraphs)}})
+        except Exception as error:
+            errors.append({"step": "txt-import-export", "code": type(error).__name__, "message": str(error)})
+
+        try:
+            epub_source = work_dir / "sample.epub"
+            _write_self_test_epub(epub_source)
+            inspection = inspect_epub(epub_source, EpubConfig())
+            steps.append({"step": "epub-inspect", "status": inspection["status"], "summary": inspection["summary"]})
+            warnings.extend(inspection.get("warnings", []))
+            epub_book = load_epub_book(epub_source, title="sample", epub_config=EpubConfig())
+            translations = {"第一章": "第一章", "Hello.": "你好。", "World.": "世界。"}
+            for paragraph in epub_book.paragraphs:
+                paragraph.translated = translations.get(paragraph.source, paragraph.source)
+            epub_output = work_dir / "translated.epub"
+            export_result = export_epub(epub_book, epub_output, EpubConfig())
+            steps.append({"step": "epub-export", "status": "ok" if not export_result["warnings"] else "warning", "summary": export_result})
+            warnings.extend(export_result.get("warnings", []))
+            validation = validate_epub(epub_output, EpubConfig())
+            steps.append({"step": "epub-validate", "status": validation["status"], "summary": validation["summary"]})
+            warnings.extend(validation.get("warnings", []))
+            if validation["status"] == "error":
+                errors.extend({**item, "step": "epub-validate"} for item in validation.get("errors", []))
+            with zipfile.ZipFile(epub_output) as archive:
+                chapter = archive.read("OEBPS/chapter1.xhtml").decode("utf-8")
+            if "你好。" not in chapter or "世界。" not in chapter:
+                raise AssertionError("EPUB 导出内容缺少译文")
+            steps.append({"step": "epub-content-check", "status": "ok", "summary": {"output": str(epub_output)}})
+        except Exception as error:
+            errors.append({"step": "epub-import-export", "code": type(error).__name__, "message": str(error)})
+    status = "error" if errors else ("warning" if warnings or any(step["status"] == "warning" for step in steps) else "ok")
+    return {
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
+        "summary": {
+            "steps": len(steps),
+            "passed": sum(1 for step in steps if step["status"] == "ok"),
+            "warnings": len(warnings),
+            "errors": len(errors),
+        },
+        "details": {"steps": steps},
+    }
+
+
+def _write_self_test_epub(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>""",
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>sample</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="toc"><itemref idref="nav" linear="no"/><itemref idref="c1"/></spine>
+</package>""",
+        )
+        archive.writestr(
+            "OEBPS/nav.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body><nav epub:type="toc"><ol><li><a href="chapter1.xhtml">第一章</a></li></ol></nav></body>
+</html>""",
+        )
+        archive.writestr(
+            "OEBPS/toc.ncx",
+            """<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="navPoint-1" playOrder="1">
+      <navLabel><text>第一章</text></navLabel>
+      <content src="chapter1.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>""",
+        )
+        archive.writestr(
+            "OEBPS/chapter1.xhtml",
+            """<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>Hello.</p><p>World.</p></body></html>""",
+        )
 
 
 def open_local(path: Path) -> dict:

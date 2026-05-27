@@ -7,7 +7,7 @@ import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
-from app.cli_main import build_parser, command_catalog, doctor, retry_failed, run_folder
+from app.cli_main import build_parser, command_catalog, doctor, retry_failed, run_folder, self_test
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -945,6 +945,16 @@ def test_doctor_warns_for_missing_config(tmp_path: Path) -> None:
     assert report["summary"]["config_exists"] is False
     assert report["summary"]["config_loadable"] is False
     assert any("setting.toml 不存在" in warning for warning in report["warnings"])
+
+
+def test_self_test_runs_txt_and_epub_smoke_checks() -> None:
+    report = self_test()
+
+    assert report["status"] == "ok"
+    assert report["summary"]["errors"] == 0
+    assert {"txt-import-export", "epub-inspect", "epub-export", "epub-validate", "epub-content-check"} <= {
+        step["step"] for step in report["details"]["steps"]
+    }
 
 
 def test_documented_agent_commands_exist_in_parser() -> None:
