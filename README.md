@@ -62,6 +62,7 @@ timeout = 600
 python3 main.py --agent-mode doctor --json
 python3 main.py --agent-mode commands --json
 python3 main.py --agent-mode self-test --json
+python3 main.py --agent-mode secret-scan --json
 ```
 
 ### 2. 注册小说
@@ -130,6 +131,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 | `python3 main.py --agent-mode doctor --json` | 输出项目健康报告，检查配置、LLM 字段、Python 版本、CI、Skill、命令数量和可选依赖。 |
 | `python3 main.py --agent-mode commands --json` | 输出机器可读 CLI 命令清单，便于 Agent 自查当前能力。 |
 | `python3 main.py --agent-mode self-test --json` | 运行内置 TXT/EPUB 冒烟测试，不需要模型或外部小说样本。 |
+| `python3 main.py --agent-mode secret-scan --json` | 扫描已跟踪文件中的疑似密钥、私钥和误跟踪的本地配置。 |
 | `python3 main.py --agent-mode inspect-epub --path ./novel.epub --json` | 注册 EPUB 前检查内部结构、目录、spine、重复文本和格式风险。 |
 | `python3 main.py --agent-mode add-book --path ./novel.epub --json` | 注册 EPUB/TXT 小说，返回后续命令使用的 `<书籍ID>`。 |
 | `python3 main.py --agent-mode list --json` | 查看本地已注册书籍。 |
@@ -409,6 +411,7 @@ python3 -m pip install -e ".[dev,epub]"
 python3 -m compileall app tests
 python3 main.py --agent-mode commands --json
 python3 main.py --agent-mode self-test --json
+python3 main.py --agent-mode secret-scan --json
 python3 -m pytest -q
 python3 -m build
 ```

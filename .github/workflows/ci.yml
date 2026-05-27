@@ -39,6 +39,9 @@ jobs:
       - name: Run built-in smoke self-test
         run: python main.py --agent-mode self-test --json
 
+      - name: Scan tracked files for secrets
+        run: python main.py --agent-mode secret-scan --json
+
       - name: Run tests
         run: python -m pytest -q
 

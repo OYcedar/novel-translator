@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -87,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
     add_common(subparsers.add_parser("commands", help="列出当前 CLI 命令能力"), json_flag=True)
     add_common(subparsers.add_parser("self-test", help="运行内置 TXT/EPUB 冒烟测试"), json_flag=True)
+    add_common(subparsers.add_parser("secret-scan", help="扫描已跟踪文件中的敏感信息"), json_flag=True)
 
     inspect_epub_parser = add_common(subparsers.add_parser("inspect-epub", help="检查 EPUB 内部结构"), json_flag=True)
     inspect_epub_parser.add_argument("--path", type=Path, required=True)
@@ -342,6 +344,8 @@ def dispatch(args: argparse.Namespace) -> dict:
         return command_catalog()
     if args.command == "self-test":
         return self_test()
+    if args.command == "secret-scan":
+        return secret_scan()
     if args.command == "inspect-epub":
         try:
             epub_config = load_config(ROOT, args.config).epub
@@ -683,6 +687,95 @@ def self_test() -> dict:
         },
         "details": {"steps": steps},
     }
+
+
+def secret_scan() -> dict:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        tracked = [line for line in result.stdout.splitlines() if line.strip()]
+    except Exception as error:
+        return {
+            "status": "error",
+            "warnings": [],
+            "errors": [{"code": "git_ls_files_failed", "message": str(error)}],
+            "summary": {"scanned_files": 0, "findings": 1},
+            "details": {"findings": []},
+        }
+    forbidden_tracked = {"setting.toml", ".env"}
+    forbidden_prefixes = (".env.",)
+    secret_patterns = [
+        ("private_key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
+        ("openai_api_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+        ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
+        ("anthropic_api_key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ]
+    findings = []
+    scanned_files = 0
+    for relative in tracked:
+        if relative in forbidden_tracked or any(relative.startswith(prefix) for prefix in forbidden_prefixes):
+            findings.append(
+                {
+                    "file": relative,
+                    "line": 0,
+                    "kind": "forbidden_tracked_file",
+                    "message": "敏感本地配置文件不应被 git 跟踪",
+                }
+            )
+            continue
+        path = ROOT / relative
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in data:
+            continue
+        scanned_files += 1
+        text = data.decode("utf-8", errors="ignore")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if _secret_scan_allowlisted_line(line):
+                continue
+            for kind, pattern in secret_patterns:
+                if pattern.search(line):
+                    findings.append(
+                        {
+                            "file": relative,
+                            "line": line_number,
+                            "kind": kind,
+                            "message": "疑似敏感信息，请改用环境变量或本地忽略文件",
+                        }
+                    )
+                    break
+    return {
+        "status": "error" if findings else "ok",
+        "warnings": [],
+        "errors": [
+            {"code": item["kind"], "message": f"{item['file']}:{item['line']} {item['message']}"}
+            for item in findings
+        ],
+        "summary": {"scanned_files": scanned_files, "findings": len(findings)},
+        "details": {"findings": findings[:100]},
+    }
+
+
+def _secret_scan_allowlisted_line(line: str) -> bool:
+    allowed_fragments = (
+        "$OPENAI_API_KEY",
+        "${OPENAI_API_KEY}",
+        "env:OPENAI_API_KEY",
+        "$NOVEL_TRANSLATOR_API_KEY",
+        "${NOVEL_TRANSLATOR_API_KEY}",
+        "env:NOVEL_TRANSLATOR_API_KEY",
+        "<API Key>",
+        "YOUR_API_KEY",
+    )
+    return any(fragment in line for fragment in allowed_fragments)
 
 
 def _write_self_test_epub(path: Path) -> None:
