@@ -164,15 +164,15 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     errors = delivery_check.get("errors", [])
     status = "error" if errors else ("warning" if combined_warnings else "ok")
     files = {
-        "translated": _file_record(translated_path),
-        "quality_report": _file_record(quality_path),
-        "delivery_check": _file_record(delivery_check_path),
-        "run_report": _file_record(run_report_path),
-        "terms": _file_record(terms_path),
-        "memory_summary": _file_record(memory_path),
+        "translated": _file_record(translated_path, output_dir),
+        "quality_report": _file_record(quality_path, output_dir),
+        "delivery_check": _file_record(delivery_check_path, output_dir),
+        "run_report": _file_record(run_report_path, output_dir),
+        "terms": _file_record(terms_path, output_dir),
+        "memory_summary": _file_record(memory_path, output_dir),
     }
     if epub_risk_path:
-        files["epub_risk_report"] = _file_record(Path(epub_risk_path))
+        files["epub_risk_report"] = _file_record(Path(epub_risk_path), output_dir)
     manifest = {
         "book": book.id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -211,10 +211,17 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     }
 
 
-def _file_record(path: Path) -> dict:
+def _file_record(path: Path, root: Path | None = None) -> dict:
     data = path.read_bytes()
+    relative_path = ""
+    if root is not None:
+        try:
+            relative_path = path.relative_to(root).as_posix()
+        except ValueError:
+            relative_path = ""
     return {
         "path": str(path),
+        "relative_path": relative_path,
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
     }
@@ -228,7 +235,7 @@ def verify_delivery(manifest_path: Path) -> dict:
     if not isinstance(files, dict) or not files:
         errors.append({"code": "files_missing", "message": "delivery-manifest.json 缺少 files 校验清单"})
     for key, record in files.items():
-        path = Path(str(record.get("path", "")))
+        path = _manifest_record_path(manifest_path, record)
         if not path.exists():
             errors.append({"code": "file_missing", "message": f"{key}: {path} 不存在"})
             continue
@@ -253,3 +260,10 @@ def verify_delivery(manifest_path: Path) -> dict:
         },
         "details": {"verified": verified, "manifest": manifest},
     }
+
+
+def _manifest_record_path(manifest_path: Path, record: dict) -> Path:
+    relative_path = str(record.get("relative_path", "")).strip()
+    if relative_path:
+        return manifest_path.parent / relative_path
+    return Path(str(record.get("path", "")))

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import zipfile
 
 from app.analysis import analyze_book, translation_plan
@@ -900,8 +901,31 @@ def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: 
     assert manifest["ready"] is True
     assert manifest["errors"] == []
     assert manifest["files"]["translated"]["path"].endswith(f"{book.id}.txt")
+    assert manifest["files"]["translated"]["relative_path"] == f"translated/{book.id}.txt"
     assert len(manifest["files"]["translated"]["sha256"]) == 64
     assert delivery_report["summary"]["ready"] is True
+
+
+def test_verify_delivery_uses_relative_paths_after_moving_package(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.", encoding="utf-8")
+    book = load_txt_book(source, title="PortableDelivery")
+    config = _app_config(tmp_path)
+    save_book(config.books_dir, book, source)
+    book.paragraphs[0].translated = "一。"
+    from app.models import persist_book
+
+    persist_book(config.books_dir, book)
+    original = tmp_path / "portable-original"
+    moved = tmp_path / "portable-moved"
+    package_delivery(config.books_dir, book, [], _quality_config(), EpubConfig(), original)
+    shutil.copytree(original, moved)
+    shutil.rmtree(original)
+    verification = verify_delivery(moved / "delivery-manifest.json")
+
+    assert verification["status"] == "ok"
+    assert verification["summary"]["verified"] > 0
+    assert all(str(moved) in item["path"] for item in verification["details"]["verified"])
 
 
 def test_verify_delivery_detects_file_tampering(tmp_path: Path) -> None:

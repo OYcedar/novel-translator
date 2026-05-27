@@ -121,6 +121,8 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 python3 main.py --agent-mode verify-delivery --manifest ./delivery/delivery-manifest.json --json
 ```
 
+`delivery` 目录可以移动或压缩后再校验；manifest 同时记录相对路径和 SHA256，适合交付给他人复核。
+
 ## 详细说明
 
 ### 常用命令
@@ -311,7 +313,7 @@ python3 main.py --agent-mode work-records --book <书籍ID> --collect-file ../im
 
 `data/books/<书籍ID>/` 仍然保存核心翻译状态；`work-records` 目录用于收纳后台脚本、日志、外部术语表、质检报告、审校材料和交付包。
 
-交付包会在 `reports/delivery-check.json` 保存生成当时的交付门槛报告，并在 `delivery-manifest.json` 写入 `generated_at`、`status`、`ready`、`errors`、`warnings`、`delivery_check_summary` 和关键文件的 `sha256` 校验信息，便于复盘待译段落、失败批次、占位符、导出风险和文件完整性。交付后可运行 `verify-delivery --manifest <交付目录>/delivery-manifest.json --json` 校验文件未被改动。如果报告存在 blockers，`package-delivery` 会返回 `error`，交付包只能作为排查材料，不能称为最终版。
+交付包会在 `reports/delivery-check.json` 保存生成当时的交付门槛报告，并在 `delivery-manifest.json` 写入 `generated_at`、`status`、`ready`、`errors`、`warnings`、`delivery_check_summary` 和关键文件的相对路径、`sha256` 校验信息，便于复盘待译段落、失败批次、占位符、导出风险和文件完整性。交付目录移动或解压到其他位置后，仍可运行 `verify-delivery --manifest <交付目录>/delivery-manifest.json --json` 校验文件未被改动。如果报告存在 blockers，`package-delivery` 会返回 `error`，交付包只能作为排查材料，不能称为最终版。
 
 ### Agent 工作区与人工修复
 
