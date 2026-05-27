@@ -309,7 +309,7 @@ python3 main.py --agent-mode work-records --book <书籍ID> --collect-file ../im
 
 `data/books/<书籍ID>/` 仍然保存核心翻译状态；`work-records` 目录用于收纳后台脚本、日志、外部术语表、质检报告、审校材料和交付包。
 
-交付包会在 `reports/delivery-check.json` 保存生成当时的交付门槛报告，便于复盘待译段落、失败批次、占位符和导出风险。
+交付包会在 `reports/delivery-check.json` 保存生成当时的交付门槛报告，便于复盘待译段落、失败批次、占位符和导出风险。如果报告存在 blockers，`package-delivery` 会返回 `error`，交付包只能作为排查材料，不能称为最终版。
 
 ### Agent 工作区与人工修复
 

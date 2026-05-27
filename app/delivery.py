@@ -173,9 +173,13 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     }
     manifest_path = output_dir / "delivery-manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    combined_warnings = warnings + delivery_check.get("warnings", [])
+    errors = delivery_check.get("errors", [])
+    status = "error" if errors else ("warning" if combined_warnings else "ok")
     return {
-        "status": "warning" if warnings or delivery_check["status"] != "ok" else "ok",
-        "warnings": warnings,
+        "status": status,
+        "warnings": combined_warnings,
+        "errors": errors,
         "summary": {
             "book": book.id,
             "output_dir": str(output_dir),
@@ -183,6 +187,7 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
             "manifest": str(manifest_path),
             "bilingual": bilingual,
             "format": selected_format,
+            "ready": delivery_check["summary"].get("ready", False),
         },
         "details": manifest,
     }

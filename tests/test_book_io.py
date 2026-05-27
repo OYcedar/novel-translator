@@ -850,6 +850,9 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert (tmp_path / "delivery" / "reports" / "delivery-check.json").exists()
     assert package["summary"]["output_dir"].endswith("delivery")
     assert package["summary"]["format"] == "txt"
+    assert package["summary"]["ready"] is False
+    assert package["status"] == "error"
+    assert {item["code"] for item in package["errors"]} == {"pending_translations"}
     assert package["details"]["delivery_check"].endswith("delivery-check.json")
 
 
@@ -875,11 +878,29 @@ def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: 
     )
 
     assert package["status"] == "ok"
+    assert package["summary"]["ready"] is True
     assert package["summary"]["format"] == "txt"
     assert package["summary"]["translated"].endswith(".txt")
     assert (tmp_path / "delivery-txt" / "translated" / f"{book.id}.txt").exists()
     delivery_report = json.loads((tmp_path / "delivery-txt" / "reports" / "delivery-check.json").read_text(encoding="utf-8"))
     assert delivery_report["summary"]["ready"] is True
+
+
+def test_package_delivery_surfaces_placeholder_blocker(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("Hello {name}.", encoding="utf-8")
+    book = load_txt_book(source, title="PackageBlocked")
+    config = _app_config(tmp_path)
+    save_book(config.books_dir, book, source)
+    book.paragraphs[0].translated = "你好。"
+    from app.models import persist_book
+
+    persist_book(config.books_dir, book)
+    package = package_delivery(config.books_dir, book, [], _quality_config(), EpubConfig(), tmp_path / "blocked-delivery")
+
+    assert package["status"] == "error"
+    assert package["summary"]["ready"] is False
+    assert {item["code"] for item in package["errors"]} == {"placeholder_mismatch"}
 
 
 def test_delivery_check_reports_ready_book(tmp_path: Path) -> None:
