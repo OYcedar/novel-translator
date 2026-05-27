@@ -843,6 +843,7 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     restore = restore_snapshot(books_dir, book.id, snapshot["summary"]["snapshot_id"])
     packaged_book = load_book(books_dir, book.id)
     package = package_delivery(books_dir, packaged_book, [], _quality_config(), EpubConfig(), tmp_path / "delivery")
+    manifest = json.loads((tmp_path / "delivery" / "delivery-manifest.json").read_text(encoding="utf-8"))
 
     assert list_snapshots(books_dir, book.id)["summary"]["count"] == 1
     assert restore["summary"]["snapshot"] == snapshot["summary"]["snapshot_id"]
@@ -854,6 +855,11 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert package["status"] == "error"
     assert {item["code"] for item in package["errors"]} == {"pending_translations"}
     assert package["details"]["delivery_check"].endswith("delivery-check.json")
+    assert manifest["status"] == "error"
+    assert manifest["ready"] is False
+    assert manifest["errors"][0]["code"] == "pending_translations"
+    assert manifest["delivery_check_summary"]["pending"] == 1
+    assert manifest["generated_at"]
 
 
 def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: Path) -> None:
@@ -882,7 +888,11 @@ def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: 
     assert package["summary"]["format"] == "txt"
     assert package["summary"]["translated"].endswith(".txt")
     assert (tmp_path / "delivery-txt" / "translated" / f"{book.id}.txt").exists()
+    manifest = json.loads((tmp_path / "delivery-txt" / "delivery-manifest.json").read_text(encoding="utf-8"))
     delivery_report = json.loads((tmp_path / "delivery-txt" / "reports" / "delivery-check.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "ok"
+    assert manifest["ready"] is True
+    assert manifest["errors"] == []
     assert delivery_report["summary"]["ready"] is True
 
 

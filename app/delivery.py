@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import shutil
@@ -158,8 +159,14 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     memory = memory_status(root_books_dir, book.id, terms)
     memory_path = metadata_dir / "memory-summary.json"
     memory_path.write_text(json.dumps(memory, ensure_ascii=False, indent=2), encoding="utf-8")
+    combined_warnings = warnings + delivery_check.get("warnings", [])
+    errors = delivery_check.get("errors", [])
+    status = "error" if errors else ("warning" if combined_warnings else "ok")
     manifest = {
         "book": book.id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "ready": delivery_check["summary"].get("ready", False),
         "translated": str(translated_path),
         "quality_report": str(quality_path),
         "delivery_check": str(delivery_check_path),
@@ -169,13 +176,12 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
         "memory_summary": str(memory_path),
         "bilingual": bilingual,
         "format": selected_format,
-        "warnings": warnings,
+        "warnings": combined_warnings,
+        "errors": errors,
+        "delivery_check_summary": delivery_check.get("summary", {}),
     }
     manifest_path = output_dir / "delivery-manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    combined_warnings = warnings + delivery_check.get("warnings", [])
-    errors = delivery_check.get("errors", [])
-    status = "error" if errors else ("warning" if combined_warnings else "ok")
     return {
         "status": status,
         "warnings": combined_warnings,
