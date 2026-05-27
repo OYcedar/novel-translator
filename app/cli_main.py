@@ -82,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
+    add_common(subparsers.add_parser("commands", help="列出当前 CLI 命令能力"), json_flag=True)
 
     inspect_epub_parser = add_common(subparsers.add_parser("inspect-epub", help="检查 EPUB 内部结构"), json_flag=True)
     inspect_epub_parser.add_argument("--path", type=Path, required=True)
@@ -333,6 +334,8 @@ def resolve_bilingual(config: AppConfig, args: argparse.Namespace) -> bool:
 def dispatch(args: argparse.Namespace) -> dict:
     if args.command == "doctor":
         return doctor(args)
+    if args.command == "commands":
+        return command_catalog()
     if args.command == "inspect-epub":
         try:
             epub_config = load_config(ROOT, args.config).epub
@@ -489,6 +492,56 @@ def doctor(args: argparse.Namespace) -> dict:
             "python": sys.version.split()[0],
         },
         "details": {},
+    }
+
+
+def command_catalog() -> dict:
+    parser = build_parser()
+    commands = []
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            help_by_name = {choice.dest: choice.help for choice in action._choices_actions}
+            for name, command_parser in sorted(action.choices.items()):
+                options = []
+                required_options = []
+                positionals = []
+                supports_json = False
+                for command_action in command_parser._actions:
+                    if command_action.dest == "help":
+                        continue
+                    if command_action.option_strings:
+                        option = {
+                            "flags": list(command_action.option_strings),
+                            "dest": command_action.dest,
+                            "required": bool(getattr(command_action, "required", False)),
+                            "takes_value": command_action.nargs != 0 and not isinstance(
+                                command_action,
+                                (argparse._StoreTrueAction, argparse._StoreFalseAction),
+                            ),
+                        }
+                        options.append(option)
+                        if option["required"]:
+                            required_options.extend(command_action.option_strings)
+                        if command_action.dest == "json_output":
+                            supports_json = True
+                    else:
+                        positionals.append(command_action.dest)
+                commands.append(
+                    {
+                        "name": name,
+                        "help": help_by_name.get(name, ""),
+                        "supports_json": supports_json,
+                        "required_options": required_options,
+                        "positionals": positionals,
+                        "options": options,
+                    }
+                )
+            break
+    return {
+        "status": "ok",
+        "warnings": [],
+        "summary": {"commands": len(commands)},
+        "details": {"commands": commands},
     }
 
 

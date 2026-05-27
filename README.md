@@ -52,6 +52,7 @@ timeout = 600
 
 ```bash
 python3 main.py --agent-mode doctor --json
+python3 main.py --agent-mode commands --json
 ```
 
 ### 2. 注册小说
@@ -118,6 +119,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 | 命令 | 备注 |
 | --- | --- |
 | `python3 main.py --agent-mode doctor --json` | 检查配置文件、项目目录和 Python 环境；首次使用先跑。 |
+| `python3 main.py --agent-mode commands --json` | 输出机器可读 CLI 命令清单，便于 Agent 自查当前能力。 |
 | `python3 main.py --agent-mode inspect-epub --path ./novel.epub --json` | 注册 EPUB 前检查内部结构、目录、spine、重复文本和格式风险。 |
 | `python3 main.py --agent-mode add-book --path ./novel.epub --json` | 注册 EPUB/TXT 小说，返回后续命令使用的 `<书籍ID>`。 |
 | `python3 main.py --agent-mode list --json` | 查看本地已注册书籍。 |

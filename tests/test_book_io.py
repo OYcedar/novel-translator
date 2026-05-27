@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import re
 import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
-from app.cli_main import retry_failed, run_folder
+from app.cli_main import build_parser, command_catalog, retry_failed, run_folder
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -900,6 +901,52 @@ def test_example_config_uses_conservative_automation_defaults() -> None:
     assert config.automation.workers == 1
     assert config.automation.rpm == 30
     assert config.automation.tpm == 0
+
+
+def test_command_catalog_lists_parser_commands() -> None:
+    parser_commands = _parser_command_names()
+    report = command_catalog()
+    catalog_commands = {item["name"] for item in report["details"]["commands"]}
+
+    assert report["status"] == "ok"
+    assert report["summary"]["commands"] == len(parser_commands)
+    assert catalog_commands == parser_commands
+    assert {"doctor", "commands", "translate", "quality-report", "package-delivery"} <= catalog_commands
+
+
+def test_documented_agent_commands_exist_in_parser() -> None:
+    root = Path(__file__).resolve().parents[1]
+    parser_commands = _parser_command_names()
+    documented = set()
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    documented.update(re.findall(r"--agent-mode\s+([a-z0-9-]+)", readme))
+
+    skill_files = [
+        root / "skills/novel-translator/SKILL.md",
+        root / "skills/novel-translator/references/cli-command-contract.md",
+        root / "skills/novel-translator/references/quality-and-recovery.md",
+        root / "skills/novel-translator/references/terminology-workflow.md",
+    ]
+    for skill_file in skill_files:
+        text = skill_file.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if not line.startswith("| `"):
+                continue
+            match = re.match(r"\| `([a-z0-9-]+)(?:\s|`)", line)
+            if match:
+                documented.add(match.group(1))
+
+    assert documented
+    assert documented <= parser_commands
+
+
+def _parser_command_names() -> set[str]:
+    parser = build_parser()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    raise AssertionError("parser has no subcommands")
 
 
 def report_context(books_dir: Path, book_id: str) -> dict:
