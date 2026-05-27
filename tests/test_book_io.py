@@ -725,6 +725,35 @@ def test_translation_payload_includes_quality_profile_and_context(tmp_path: Path
     assert payload["items"][0]["placeholders"][0]["value"] == "{name}"
 
 
+def test_translation_payload_includes_style_reference_when_configured(tmp_path: Path) -> None:
+    sample = tmp_path / "style.md"
+    sample.write_text("她停在雨里，轻声说：今晚不回头。\n第二行会被截断。", encoding="utf-8")
+    source = tmp_path / "payload.txt"
+    source.write_text("She stopped in the rain.", encoding="utf-8")
+    book = load_txt_book(source, title="StyleReference")
+    config = AppConfig(
+        root=tmp_path,
+        llm=LlmConfig(base_url="", api_key="", model="test-model"),
+        translation=TranslationConfig(
+            system_prompt_file="prompt.md",
+            style_sample_file="style.md",
+            style_sample_max_chars=12,
+        ),
+        context=ContextConfig(),
+        review=ReviewConfig(),
+        automation=AutomationConfig(),
+        export=ExportConfig(),
+        quality=QualityConfig(source_residual_patterns=()),
+        epub=EpubConfig(),
+    )
+
+    payload = build_translation_payload(config, [book.paragraphs[0]], [], book=book, context={})
+
+    assert payload["style_reference"]["text"] == "她停在雨里，轻声说：今晚"
+    assert payload["style_reference"]["path"] == str(sample)
+    assert "不要照抄" in payload["style_reference"]["instruction"]
+
+
 def test_run_report_and_failed_ids(tmp_path: Path) -> None:
     books_dir = tmp_path / "books"
     record_batch(
@@ -1190,6 +1219,8 @@ model = "model"
     assert config.automation.tpm == 0
     assert "生硬直译" in config.translation.style_guide
     assert "称谓" in config.translation.dialogue_style
+    assert config.translation.style_sample_file == ""
+    assert config.translation.style_sample_max_chars == 1200
 
 
 def test_load_config_resolves_llm_from_environment(tmp_path: Path) -> None:
@@ -1230,6 +1261,8 @@ def test_example_config_uses_high_throughput_automation_defaults() -> None:
     assert config.automation.tpm == 0
     assert "生硬直译" in config.translation.style_guide
     assert "称谓" in config.translation.dialogue_style
+    assert config.translation.style_sample_file == ""
+    assert config.translation.style_sample_max_chars == 1200
 
 
 def test_project_metadata_is_publishable() -> None:
@@ -1290,13 +1323,18 @@ def test_check_strict_promotes_warnings_to_errors(tmp_path: Path) -> None:
 
 def test_doctor_reports_project_health_for_valid_config(tmp_path: Path) -> None:
     config_path = tmp_path / "setting.toml"
+    style_sample = tmp_path / "style.md"
+    style_sample.write_text("样例译文。", encoding="utf-8")
     config_path.write_text(
         """
 [llm]
 base_url = "https://api.example.com/v1"
 api_key = "real-key"
 model = "model"
-""".strip(),
+[translation]
+style_sample_file = "%s"
+""".strip()
+        % str(style_sample),
         encoding="utf-8",
     )
 
@@ -1308,6 +1346,7 @@ model = "model"
     assert report["summary"]["llm_configured"] is True
     assert report["summary"]["commands"] == len(_parser_command_names())
     assert report["summary"]["ci_configured"] is True
+    assert report["summary"]["style_sample"]["exists"] is True
     assert report["details"]["required_files"]["readme"] is True
     assert report["details"]["required_files"]["license"] is True
     assert "api_key" not in str(report)
@@ -1320,6 +1359,28 @@ def test_doctor_warns_for_missing_config(tmp_path: Path) -> None:
     assert report["summary"]["config_exists"] is False
     assert report["summary"]["config_loadable"] is False
     assert any("setting.toml 不存在" in warning for warning in report["warnings"])
+
+
+def test_doctor_warns_for_missing_style_sample(tmp_path: Path) -> None:
+    config_path = tmp_path / "setting.toml"
+    config_path.write_text(
+        """
+[llm]
+base_url = "https://api.example.com/v1"
+api_key = "real-key"
+model = "model"
+[translation]
+style_sample_file = "missing-style.md"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    report = doctor(argparse.Namespace(config=config_path))
+
+    assert report["status"] == "warning"
+    assert report["summary"]["style_sample"]["configured"] is True
+    assert report["summary"]["style_sample"]["exists"] is False
+    assert any("style_sample_file" in warning for warning in report["warnings"])
 
 
 def test_self_test_runs_txt_and_epub_smoke_checks() -> None:

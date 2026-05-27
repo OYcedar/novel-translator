@@ -26,6 +26,8 @@ class TranslationConfig:
     system_prompt_file: str = "prompts/novel_translation_system.md"
     style_guide: str = "自然流畅的简体中文小说译文，忠实原意，避免生硬直译。"
     dialogue_style: str = "符合中文网文/出版小说阅读习惯，称谓、语气和人物关系保持连续。"
+    style_sample_file: str = ""
+    style_sample_max_chars: int = 1200
     batch_max_chars: int = 4000
     retry_count: int = 3
     retry_delay: int = 2
@@ -111,6 +113,16 @@ class AppConfig:
             return configured
         return self.root / configured
 
+    @property
+    def style_sample_path(self) -> Path | None:
+        configured = self.translation.style_sample_file.strip()
+        if not configured:
+            return None
+        path = Path(configured)
+        if path.is_absolute():
+            return path
+        return self.root / path
+
 
 def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     path = config_path or root / "setting.toml"
@@ -159,6 +171,8 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
                 "符合中文网文/出版小说阅读习惯，称谓、语气和人物关系保持连续。",
             )
         ),
+        style_sample_file=str(translation_raw.get("style_sample_file", "")),
+        style_sample_max_chars=int(translation_raw.get("style_sample_max_chars", 1200)),
         batch_max_chars=int(translation_raw.get("batch_max_chars", 4000)),
         retry_count=int(translation_raw.get("retry_count", 3)),
         retry_delay=int(translation_raw.get("retry_delay", 2)),

@@ -379,8 +379,12 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 ```toml
 style_guide = "自然流畅的简体中文小说译文，忠实原意，避免生硬直译。"
 dialogue_style = "符合中文网文/出版小说阅读习惯，称谓、语气和人物关系保持连续。"
+style_sample_file = ""
+style_sample_max_chars = 1200
 quality_passes = 2
 ```
+
+如果希望更贴近某本书或某个译者的中文节奏，可以把一小段已经认可的译文保存成文本文件，并把 `style_sample_file` 指向它。翻译请求会注入 `style_reference`，只要求模型参考叙事节奏、对话口吻、标点和句式密度，不会要求照抄样例内容。`doctor --json` 会提示样例文件是否缺失。
 
 ### 数据位置
 

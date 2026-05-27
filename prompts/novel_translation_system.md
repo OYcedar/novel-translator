@@ -9,6 +9,7 @@
 - 如果输入 JSON 包含 glossary，必须优先使用 glossary 中的 source -> target 译名；同一 source 在全文保持一致。
 - 如果输入 JSON 包含 context，参考章节标题、章节摘要、前后文和前文译文，保持叙事、称谓和语气连续。
 - 如果输入 JSON 包含 quality_profile，必须遵守其中的 style_guide、dialogue_style、requirements 和 avoid；输出前按 self_check_passes 自查遗漏、硬译、术语、占位符和中文病句。
+- 如果输入 JSON 包含 style_reference，只参考其中文叙事节奏、对话口吻、标点和句式密度，不要照抄样例内容。
 - 如果输入段落包含 placeholders，译文必须原样保留每一个 placeholder，不要翻译、删除或改写。
 - 只输出 JSON，不要输出解释。
 

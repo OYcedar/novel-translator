@@ -578,6 +578,7 @@ def doctor(args: argparse.Namespace) -> dict:
     config_error = ""
     llm_configured = False
     system_prompt_exists = required_file_status["system_prompt"]
+    style_sample_status = {"configured": False, "exists": False, "path": ""}
     automation = {}
     if config_exists:
         try:
@@ -590,6 +591,13 @@ def doctor(args: argparse.Namespace) -> dict:
                 and loaded.llm.api_key not in {"YOUR_API_KEY", "<API Key>"}
             )
             system_prompt_exists = loaded.system_prompt_path.exists()
+            style_sample_path = loaded.style_sample_path
+            if style_sample_path is not None:
+                style_sample_status = {
+                    "configured": True,
+                    "exists": style_sample_path.exists() and style_sample_path.is_file(),
+                    "path": str(style_sample_path),
+                }
             automation = {
                 "workers": loaded.automation.workers,
                 "rpm": loaded.automation.rpm,
@@ -619,6 +627,8 @@ def doctor(args: argparse.Namespace) -> dict:
         warnings.append(f"关键项目文件缺失：{', '.join(missing_files)}。")
     if not system_prompt_exists:
         warnings.append("系统提示词文件不存在，真实翻译前必须修复 translation.system_prompt_file。")
+    if style_sample_status["configured"] and not style_sample_status["exists"]:
+        warnings.append("translation.style_sample_file 已配置但文件不存在，风格样例不会注入翻译请求。")
     if config_loadable and automation.get("workers", 200) > 1 and automation.get("rpm", 200) <= 0:
         warnings.append("启用并发但未设置 rpm 限速，可能触发模型服务限流。")
     status = "error" if errors else ("warning" if warnings else "ok")
@@ -637,6 +647,7 @@ def doctor(args: argparse.Namespace) -> dict:
             "python_supported": python_supported,
             "commands": command_catalog()["summary"]["commands"],
             "ci_configured": required_file_status["ci"],
+            "style_sample": style_sample_status,
         },
         "details": {
             "required_files": required_file_status,

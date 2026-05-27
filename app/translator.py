@@ -85,7 +85,7 @@ def build_translation_payload(
     book: Book | None = None,
     context: dict | None = None,
 ) -> dict:
-    return {
+    payload = {
         "source_language": config.translation.source_language,
         "target_language": config.translation.target_language,
         "quality_profile": translation_quality_profile(config),
@@ -100,6 +100,10 @@ def build_translation_payload(
             for item in paragraphs
         ],
     }
+    style_reference = translation_style_reference(config)
+    if style_reference:
+        payload["style_reference"] = style_reference
+    return payload
 
 
 def translation_quality_profile(config: AppConfig) -> dict:
@@ -124,6 +128,24 @@ def translation_quality_profile(config: AppConfig) -> dict:
             "把旁白翻成解释性摘要",
             "删除或改写占位符、HTML 标签和脚注锚点",
         ],
+    }
+
+
+def translation_style_reference(config: AppConfig) -> dict:
+    path = config.style_sample_path
+    if path is None or not path.exists() or not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8").strip()
+    max_chars = max(0, config.translation.style_sample_max_chars)
+    if max_chars:
+        text = text[:max_chars]
+    if not text:
+        return {}
+    return {
+        "path": str(path),
+        "max_chars": max_chars,
+        "text": text,
+        "instruction": "参考这个样例的中文叙事节奏、对话口吻、标点和句式密度；不要照抄样例内容。",
     }
 
 

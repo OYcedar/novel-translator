@@ -51,7 +51,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 11. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
 12. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
 13. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
-14. 先确认 `setting.toml` 的 `[translation] style_guide`、`dialogue_style` 和 `quality_passes` 符合本书目标读者；真实翻译请求会把这些要求放入 `quality_profile`，用于约束文风、对话、忠实度和自查。
+14. 先确认 `setting.toml` 的 `[translation] style_guide`、`dialogue_style`、`style_sample_file` 和 `quality_passes` 符合本书目标读者；真实翻译请求会把这些要求放入 `quality_profile`，并在样例文件存在时注入 `style_reference`，用于约束文风、对话、忠实度和自查。
 15. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
 16. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
 17. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
@@ -64,7 +64,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 ## 硬门槛
 
 - 未完成术语导入前，不启动真实模型翻译，除非用户明确要求跳过术语流程。
-- 小批量试翻前必须确认 `quality_profile` 的文风目标；如果用户要求特定题材口吻，先改 `setting.toml` 的 `style_guide` 或 `dialogue_style`。
+- 小批量试翻前必须确认 `quality_profile` 的文风目标；如果用户要求特定题材口吻，先改 `setting.toml` 的 `style_guide`、`dialogue_style`，或把认可的译文片段写入 `style_sample_file`。
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
 - `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
 - 交付前 `delivery-check` 不能是 `error` 且 `summary.ready` 必须为 `true`；`run-report.summary.failed` 必须为 0，`validate-export` 不能是 `error`。
