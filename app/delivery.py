@@ -218,3 +218,38 @@ def _file_record(path: Path) -> dict:
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
     }
+
+
+def verify_delivery(manifest_path: Path) -> dict:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    errors = []
+    verified = []
+    files = manifest.get("files", {})
+    if not isinstance(files, dict) or not files:
+        errors.append({"code": "files_missing", "message": "delivery-manifest.json 缺少 files 校验清单"})
+    for key, record in files.items():
+        path = Path(str(record.get("path", "")))
+        if not path.exists():
+            errors.append({"code": "file_missing", "message": f"{key}: {path} 不存在"})
+            continue
+        actual = _file_record(path)
+        if actual["sha256"] != record.get("sha256"):
+            errors.append({"code": "sha256_mismatch", "message": f"{key}: sha256 不匹配"})
+        if actual["bytes"] != record.get("bytes"):
+            errors.append({"code": "size_mismatch", "message": f"{key}: 文件大小不匹配"})
+        if not any(item["message"].startswith(f"{key}:") for item in errors):
+            verified.append({"name": key, **actual})
+    return {
+        "status": "error" if errors else "ok",
+        "warnings": [],
+        "errors": errors,
+        "summary": {
+            "manifest": str(manifest_path),
+            "book": manifest.get("book", ""),
+            "ready": bool(manifest.get("ready", False)),
+            "files": len(files) if isinstance(files, dict) else 0,
+            "verified": len(verified),
+            "errors": len(errors),
+        },
+        "details": {"verified": verified, "manifest": manifest},
+    }

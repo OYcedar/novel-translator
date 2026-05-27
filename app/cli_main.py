@@ -18,7 +18,7 @@ from app.analysis import analyze_book as analyze_book_report, translation_plan a
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_source_book, load_txt_book, validate_epub
 from app.config import AppConfig, EpubConfig, load_config, load_toml
 from app.context import context_status, load_context, summarize_context
-from app.delivery import delivery_check_report, export_epub_risk_report, package_delivery
+from app.delivery import delivery_check_report, export_epub_risk_report, package_delivery, verify_delivery
 from app.feedback import verify_feedback_text
 from app.manual import (
     audit_coverage_report,
@@ -313,6 +313,9 @@ def build_parser() -> argparse.ArgumentParser:
     delivery.add_argument("--format", choices=["txt", "epub"], help="交付包译本格式，默认跟随源书格式")
     add_export_mode_flags(delivery)
 
+    verify_delivery_parser = add_common(subparsers.add_parser("verify-delivery", help="校验交付包文件哈希"), json_flag=True)
+    verify_delivery_parser.add_argument("--manifest", type=Path, required=True)
+
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
     export.add_argument("--book", required=True)
     export.add_argument("--format", choices=["txt", "epub"], required=True)
@@ -505,6 +508,8 @@ def dispatch(args: argparse.Namespace) -> dict:
             bilingual=resolve_bilingual(config, args),
             export_format=args.format,
         )
+    if args.command == "verify-delivery":
+        return verify_delivery(args.manifest.expanduser().resolve())
     if args.command == "export":
         return export_book(config, args)
     if args.command == "validate-export":

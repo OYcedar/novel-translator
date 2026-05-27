@@ -13,7 +13,7 @@ from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, l
 from app.cli_main import build_parser, check, command_catalog, delivery_check, doctor, retry_failed, run_folder, secret_scan, self_test, version_report
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
-from app.delivery import package_delivery
+from app.delivery import package_delivery, verify_delivery
 from app.feedback import verify_feedback_text
 from app.manual import export_pending_translations, import_manual_translations, reset_translations
 from app.memory import export_memory, import_memory, load_memory, lookup_memory, remember_translation, terminology_hash
@@ -863,6 +863,9 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert manifest["generated_at"]
     assert manifest["files"]["translated"]["sha256"] == hashlib.sha256(Path(manifest["translated"]).read_bytes()).hexdigest()
     assert manifest["files"]["delivery_check"]["bytes"] > 0
+    verification = verify_delivery(tmp_path / "delivery" / "delivery-manifest.json")
+    assert verification["status"] == "ok"
+    assert verification["summary"]["verified"] == len(manifest["files"])
 
 
 def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: Path) -> None:
@@ -899,6 +902,25 @@ def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: 
     assert manifest["files"]["translated"]["path"].endswith(f"{book.id}.txt")
     assert len(manifest["files"]["translated"]["sha256"]) == 64
     assert delivery_report["summary"]["ready"] is True
+
+
+def test_verify_delivery_detects_file_tampering(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("One.", encoding="utf-8")
+    book = load_txt_book(source, title="VerifyDelivery")
+    config = _app_config(tmp_path)
+    save_book(config.books_dir, book, source)
+    book.paragraphs[0].translated = "一。"
+    from app.models import persist_book
+
+    persist_book(config.books_dir, book)
+    package = package_delivery(config.books_dir, book, [], _quality_config(), EpubConfig(), tmp_path / "verify-delivery")
+    manifest_path = Path(package["summary"]["manifest"])
+    Path(package["summary"]["translated"]).write_text("tampered", encoding="utf-8")
+    verification = verify_delivery(manifest_path)
+
+    assert verification["status"] == "error"
+    assert "sha256_mismatch" in {item["code"] for item in verification["errors"]}
 
 
 def test_package_delivery_surfaces_placeholder_blocker(tmp_path: Path) -> None:
