@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import json
 import os
 import re
 import zipfile
@@ -846,8 +847,10 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert list_snapshots(books_dir, book.id)["summary"]["count"] == 1
     assert restore["summary"]["snapshot"] == snapshot["summary"]["snapshot_id"]
     assert (tmp_path / "delivery" / "delivery-manifest.json").exists()
+    assert (tmp_path / "delivery" / "reports" / "delivery-check.json").exists()
     assert package["summary"]["output_dir"].endswith("delivery")
     assert package["summary"]["format"] == "txt"
+    assert package["details"]["delivery_check"].endswith("delivery-check.json")
 
 
 def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: Path) -> None:
@@ -875,6 +878,8 @@ def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: 
     assert package["summary"]["format"] == "txt"
     assert package["summary"]["translated"].endswith(".txt")
     assert (tmp_path / "delivery-txt" / "translated" / f"{book.id}.txt").exists()
+    delivery_report = json.loads((tmp_path / "delivery-txt" / "reports" / "delivery-check.json").read_text(encoding="utf-8"))
+    assert delivery_report["summary"]["ready"] is True
 
 
 def test_delivery_check_reports_ready_book(tmp_path: Path) -> None:

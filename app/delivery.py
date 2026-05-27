@@ -10,6 +10,7 @@ from app.models import Book
 from app.quality import quality_report
 from app.runs import export_run_report, run_report
 from app.terminology import Term
+from app.translator import pending_paragraphs
 
 
 def export_epub_risk_report(book: Book, output: Path) -> dict:
@@ -45,6 +46,77 @@ def export_epub_risk_report(book: Book, output: Path) -> dict:
     return {"status": "ok", "warnings": [], "summary": {"book": book.id, "output": str(output), "risks": len(items)}, "details": {"items": items}}
 
 
+def delivery_check_report(root_books_dir: Path, book: Book, terms: list[Term], quality_config, export_format: str) -> dict:
+    quality = quality_report(book, quality_config, terms)
+    pending_ids = {paragraph.id for paragraph in pending_paragraphs(book.paragraphs)}
+    runs = run_report(root_books_dir, book.id, pending_ids)
+    pending = len(pending_ids)
+    errors = []
+    warnings = []
+    if pending:
+        errors.append({"code": "pending_translations", "message": f"还有 {pending} 个段落未翻译"})
+    if runs["summary"].get("failed", 0):
+        errors.append({"code": "failed_batches", "message": f"仍有 {runs['summary']['failed']} 个失败批次未恢复"})
+    if quality["summary"].get("placeholder_mismatch", 0):
+        errors.append(
+            {
+                "code": "placeholder_mismatch",
+                "message": f"存在 {quality['summary']['placeholder_mismatch']} 个占位符缺失问题",
+            }
+        )
+    if export_format == "epub" and book.source_type != "epub":
+        errors.append({"code": "export_format_invalid", "message": "TXT 注册书籍不能导出 EPUB"})
+    if quality["status"] != "ok":
+        warnings.append("quality-report 仍有 warning，交付前需要修复或在交付说明中解释。")
+    if export_format == "epub" and quality["summary"].get("epub_markup_risk", 0):
+        warnings.append(f"存在 {quality['summary']['epub_markup_risk']} 个 EPUB 标记风险段落，导出后需要人工复核")
+    if runs["status"] == "warning" and not runs["summary"].get("failed", 0):
+        warnings.extend(runs.get("warnings", []))
+    status = "error" if errors else ("warning" if warnings else "ok")
+    steps = [
+        {
+            "step": "translation-status",
+            "status": "ok",
+            "summary": {
+                "book": book.id,
+                "total": len(book.paragraphs),
+                "translated": len(book.paragraphs) - pending,
+                "pending": pending,
+                "progress": round((len(book.paragraphs) - pending) / len(book.paragraphs), 4) if book.paragraphs else 1,
+            },
+        },
+        {"step": "run-report", "status": runs["status"], "summary": runs["summary"]},
+        {"step": "quality-report", "status": quality["status"], "summary": quality["summary"]},
+        {
+            "step": "validate-export",
+            "status": "error" if any(item["code"] in {"pending_translations", "export_format_invalid"} for item in errors) else ("warning" if warnings or quality["status"] != "ok" else "ok"),
+            "summary": {
+                "book": book.id,
+                "format": export_format,
+                "quality_status": quality["status"],
+                "pending": pending,
+                "epub_markup_risk": quality["summary"].get("epub_markup_risk", 0),
+            },
+        },
+    ]
+    return {
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
+        "summary": {
+            "book": book.id,
+            "format": export_format,
+            "ready": status == "ok",
+            "pending": pending,
+            "failed_batches": runs["summary"].get("failed", 0),
+            "placeholder_mismatch": quality["summary"].get("placeholder_mismatch", 0),
+            "quality_status": quality["status"],
+            "export_status": steps[-1]["status"],
+        },
+        "details": {"steps": steps, "blockers": errors, "quality": quality},
+    }
+
+
 def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], quality_config, epub_config, output_dir: Path, *, bilingual: bool = False, export_format: str | None = None) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     translated_dir = output_dir / "translated"
@@ -71,6 +143,9 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     quality = quality_report(book, quality_config, terms)
     quality_path = reports_dir / "quality-report.json"
     quality_path.write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
+    delivery_check = delivery_check_report(root_books_dir, book, terms, quality_config, selected_format)
+    delivery_check_path = reports_dir / "delivery-check.json"
+    delivery_check_path.write_text(json.dumps(delivery_check, ensure_ascii=False, indent=2), encoding="utf-8")
     run_report_path = reports_dir / "run-report.md"
     export_run_report(root_books_dir, book.id, run_report_path)
     epub_risk_path = ""
@@ -87,6 +162,7 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
         "book": book.id,
         "translated": str(translated_path),
         "quality_report": str(quality_path),
+        "delivery_check": str(delivery_check_path),
         "run_report": str(run_report_path),
         "epub_risk_report": epub_risk_path,
         "terms": str(terms_path),
@@ -98,7 +174,7 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     manifest_path = output_dir / "delivery-manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
-        "status": "warning" if warnings or quality["status"] != "ok" else "ok",
+        "status": "warning" if warnings or delivery_check["status"] != "ok" else "ok",
         "warnings": warnings,
         "summary": {
             "book": book.id,

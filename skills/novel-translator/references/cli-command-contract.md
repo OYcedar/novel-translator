@@ -100,6 +100,6 @@ python3 main.py --agent-mode <命令> ...
 | `validate-export --book <书籍ID> --format txt|epub --json` | 导出前检查 pending、质量和 EPUB 标记风险 | 最终交付前应为 `ok` | warning 需要解释；error 必须修复 |
 | `delivery-check --book <书籍ID> --format txt|epub --json` | 聚合交付门槛，检查待译、失败批次、占位符、质量和导出风险 | `status` 为 `ok` 且 `summary.ready=true` | 按 `details.blockers` 先修阻断项 |
 | `export-epub-risk-report --book <书籍ID> --output <报告.md> --json` | 导出 EPUB 标记风险报告 | EPUB 风险段落数量可解释 | EPUB 有风险时交付包必须包含 |
-| `package-delivery --book <书籍ID> --output-dir <目录> --format txt|epub --json` | 生成指定格式的译本、质量报告、运行报告、术语和元数据交付包 | 目录含 delivery-manifest.json | warning 必须在交付说明中解释；TXT 书不能打 EPUB 包 |
+| `package-delivery --book <书籍ID> --output-dir <目录> --format txt|epub --json` | 生成指定格式的译本、交付门槛报告、质量报告、运行报告、术语和元数据交付包 | 目录含 delivery-manifest.json 和 reports/delivery-check.json | warning 必须在交付说明中解释；TXT 书不能打 EPUB 包 |
 
 EPUB 导出按导入时保存的 `chapter_path`、`node_index` 和 `text_hash` 回写。遇到节点失效或 hash 不一致时，导出会 warning 并保留原文，不能把这类输出称为最终版。

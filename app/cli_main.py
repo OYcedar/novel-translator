@@ -18,7 +18,7 @@ from app.analysis import analyze_book as analyze_book_report, translation_plan a
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_source_book, load_txt_book, validate_epub
 from app.config import AppConfig, EpubConfig, load_config, load_toml
 from app.context import context_status, load_context, summarize_context
-from app.delivery import export_epub_risk_report, package_delivery
+from app.delivery import delivery_check_report, export_epub_risk_report, package_delivery
 from app.feedback import verify_feedback_text
 from app.manual import (
     audit_coverage_report,
@@ -1881,71 +1881,7 @@ def validate_export(config: AppConfig, args: argparse.Namespace) -> dict:
 def delivery_check(config: AppConfig, args: argparse.Namespace) -> dict:
     book = load_book(config.books_dir, args.book)
     terms = load_terms(config.books_dir, book.id)
-    pending_ids = _pending_id_set(book)
-    translation = translation_status(config, book.id)
-    runs = run_report(config.books_dir, book.id, pending_ids)
-    quality = quality_report(book, config.quality, terms)
-    export_validation = validate_export(config, args)
-    errors = []
-    warnings = []
-    if translation["summary"].get("pending", 0):
-        errors.append(
-            {
-                "code": "pending_translations",
-                "message": f"还有 {translation['summary']['pending']} 个段落未翻译",
-            }
-        )
-    if runs["summary"].get("failed", 0):
-        errors.append(
-            {
-                "code": "failed_batches",
-                "message": f"仍有 {runs['summary']['failed']} 个失败批次未恢复",
-            }
-        )
-    if quality["summary"].get("placeholder_mismatch", 0):
-        errors.append(
-            {
-                "code": "placeholder_mismatch",
-                "message": f"存在 {quality['summary']['placeholder_mismatch']} 个占位符缺失问题",
-            }
-        )
-    errors.extend(
-        item
-        for item in export_validation.get("errors", [])
-        if item.get("code") != "export_pending_translations"
-    )
-    if quality["status"] != "ok":
-        warnings.append("quality-report 仍有 warning，交付前需要修复或在交付说明中解释。")
-    warnings.extend(export_validation.get("warnings", []))
-    if runs["status"] == "warning" and not runs["summary"].get("failed", 0):
-        warnings.extend(runs.get("warnings", []))
-    status = "error" if errors else ("warning" if warnings else "ok")
-    steps = [
-        {"step": "translation-status", "status": translation["status"], "summary": translation["summary"]},
-        {"step": "run-report", "status": runs["status"], "summary": runs["summary"]},
-        {"step": "quality-report", "status": quality["status"], "summary": quality["summary"]},
-        {"step": "validate-export", "status": export_validation["status"], "summary": export_validation["summary"]},
-    ]
-    return {
-        "status": status,
-        "warnings": warnings,
-        "errors": errors,
-        "summary": {
-            "book": book.id,
-            "format": args.format,
-            "ready": status == "ok",
-            "pending": translation["summary"].get("pending", 0),
-            "failed_batches": runs["summary"].get("failed", 0),
-            "placeholder_mismatch": quality["summary"].get("placeholder_mismatch", 0),
-            "quality_status": quality["status"],
-            "export_status": export_validation["status"],
-        },
-        "details": {
-            "steps": steps,
-            "blockers": errors,
-            "quality": quality,
-        },
-    }
+    return delivery_check_report(config.books_dir, book, terms, config.quality, args.format)
 
 
 def emit(payload: dict, *, json_output: bool) -> None:

@@ -165,7 +165,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 | `python3 main.py --agent-mode verify-feedback-text --book <书籍ID> --input ./feedback.txt --json` | 按读者反馈文本反查原文/译文段落。 |
 | `python3 main.py --agent-mode export-epub-risk-report --book <书籍ID> --output ./epub-risk.md --json` | 导出 EPUB 标记风险报告，发布前用于人工复核。 |
 | `python3 main.py --agent-mode run-pipeline --book <书籍ID> --json` | 执行快照、分析、计划、上下文、翻译、重试、质量和审校流水线。 |
-| `python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --format epub --json` | 生成交付包，包含译本、质量报告、运行报告、术语和元数据；`--format` 省略时跟随源书格式。 |
+| `python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./delivery --format epub --json` | 生成交付包，包含译本、交付门槛报告、质量报告、运行报告、术语和元数据；`--format` 省略时跟随源书格式。 |
 | `python3 main.py --agent-mode validate-export --book <书籍ID> --format epub --json` | 导出前检查；最终交付不能有 error。 |
 | `python3 main.py --agent-mode delivery-check --book <书籍ID> --format epub --json` | 聚合最终交付门槛，检查待译段落、失败批次、占位符、质量报告和导出风险。 |
 | `python3 main.py --agent-mode export --book <书籍ID> --format txt --output ./translated.txt --json` | 导出 TXT 译本。 |
@@ -308,6 +308,8 @@ python3 main.py --agent-mode work-records --book <书籍ID> --collect-file ../im
 ```
 
 `data/books/<书籍ID>/` 仍然保存核心翻译状态；`work-records` 目录用于收纳后台脚本、日志、外部术语表、质检报告、审校材料和交付包。
+
+交付包会在 `reports/delivery-check.json` 保存生成当时的交付门槛报告，便于复盘待译段落、失败批次、占位符和导出风险。
 
 ### Agent 工作区与人工修复
 
