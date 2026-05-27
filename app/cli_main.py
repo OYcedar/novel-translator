@@ -16,7 +16,7 @@ from pathlib import Path
 
 from app.analysis import analyze_book as analyze_book_report, translation_plan as translation_plan_report
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_source_book, load_txt_book, validate_epub
-from app.config import AppConfig, EpubConfig, load_config
+from app.config import AppConfig, EpubConfig, load_config, load_toml
 from app.context import context_status, load_context, summarize_context
 from app.delivery import export_epub_risk_report, package_delivery
 from app.feedback import verify_feedback_text
@@ -85,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, help="配置文件路径，默认 setting.toml")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    add_common(subparsers.add_parser("version", help="输出版本和运行环境信息"), json_flag=True)
     add_common(subparsers.add_parser("doctor", help="检查配置和目录"), json_flag=True)
     check_parser = add_common(subparsers.add_parser("check", help="运行项目聚合质量门禁"), json_flag=True)
     check_parser.add_argument("--strict", action="store_true", help="将 warning 升级为 error，适合发布或交付前硬门槛")
@@ -344,6 +345,8 @@ def resolve_bilingual(config: AppConfig, args: argparse.Namespace) -> bool:
 
 
 def dispatch(args: argparse.Namespace) -> dict:
+    if args.command == "version":
+        return version_report()
     if args.command == "doctor":
         return doctor(args)
     if args.command == "check":
@@ -499,6 +502,47 @@ def dispatch(args: argparse.Namespace) -> dict:
     raise ValueError(f"未知命令：{args.command}")
 
 
+def version_report() -> dict:
+    metadata = load_toml(ROOT / "pyproject.toml").get("project", {})
+    commit = _git_output(["git", "rev-parse", "--short", "HEAD"])
+    branch = _git_output(["git", "branch", "--show-current"])
+    dirty = bool(_git_output(["git", "status", "--short"]))
+    return {
+        "status": "ok",
+        "warnings": [],
+        "errors": [],
+        "summary": {
+            "name": metadata.get("name", "novel-translator"),
+            "version": metadata.get("version", "0.0.0"),
+            "python": sys.version.split()[0],
+            "commit": commit,
+            "branch": branch,
+            "dirty": dirty,
+            "commands": command_catalog()["summary"]["commands"],
+        },
+        "details": {
+            "requires_python": metadata.get("requires-python", ""),
+            "repository": metadata.get("urls", {}).get("Repository", ""),
+            "root": str(ROOT),
+        },
+    }
+
+
+def _git_output(command: list[str]) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
 def doctor(args: argparse.Namespace) -> dict:
     config_path = (args.config or ROOT / "setting.toml").expanduser()
     if not config_path.is_absolute():
@@ -639,6 +683,7 @@ def command_catalog() -> dict:
 
 def check(args: argparse.Namespace) -> dict:
     step_reports = [
+        ("version", version_report()),
         ("doctor", doctor(args)),
         ("commands", command_catalog()),
         ("self-test", self_test()),

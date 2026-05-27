@@ -8,7 +8,7 @@ import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
-from app.cli_main import build_parser, check, command_catalog, delivery_check, doctor, retry_failed, run_folder, secret_scan, self_test
+from app.cli_main import build_parser, check, command_catalog, delivery_check, doctor, retry_failed, run_folder, secret_scan, self_test, version_report
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -995,7 +995,17 @@ def test_command_catalog_lists_parser_commands() -> None:
     assert report["status"] == "ok"
     assert report["summary"]["commands"] == len(parser_commands)
     assert catalog_commands == parser_commands
-    assert {"doctor", "check", "commands", "translate", "quality-report", "package-delivery"} <= catalog_commands
+    assert {"version", "doctor", "check", "commands", "translate", "quality-report", "package-delivery"} <= catalog_commands
+
+
+def test_version_report_includes_metadata() -> None:
+    report = version_report()
+
+    assert report["status"] == "ok"
+    assert report["summary"]["name"] == "novel-translator"
+    assert report["summary"]["version"]
+    assert report["summary"]["commands"] == len(_parser_command_names())
+    assert report["details"]["repository"] == "https://github.com/OYcedar/novel-translator"
 
 
 def test_check_runs_project_quality_gates() -> None:
@@ -1005,7 +1015,7 @@ def test_check_runs_project_quality_gates() -> None:
     assert report["status"] in {"ok", "warning"}
     assert report["summary"]["errors"] == 0
     assert report["summary"]["strict"] is False
-    assert {"doctor", "commands", "self-test", "secret-scan"} <= set(steps)
+    assert {"version", "doctor", "commands", "self-test", "secret-scan"} <= set(steps)
     assert steps["commands"]["summary"]["commands"] == len(_parser_command_names())
 
 

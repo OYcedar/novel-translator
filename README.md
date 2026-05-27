@@ -126,6 +126,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 
 | 命令 | 备注 |
 | --- | --- |
+| `python3 main.py --agent-mode version --json` | 输出工具版本、Git 提交、分支、Python 版本和命令数量，适合问题排查和交付记录。 |
 | `python3 main.py --agent-mode check --json` | 一次运行项目聚合质量门禁，包含健康检查、命令清单、内置自测和敏感信息扫描。 |
 | `python3 main.py --agent-mode check --strict --json` | 发布或交付前硬门槛，会把任何 warning 升级为 error。 |
 | `python3 main.py --agent-mode doctor --json` | 输出项目健康报告，检查配置、LLM 字段、Python 版本、CI、Skill、命令数量和可选依赖。 |
