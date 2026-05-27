@@ -13,6 +13,10 @@ epub = [
     "beautifulsoup4>=4.12.0",
     "lxml>=5.0.0",
 ]
+dev = [
+    "build>=1.2.0",
+    "pytest>=8.0.0",
+]
 
 [project.scripts]
 novel-translator = "app.cli_main:main"

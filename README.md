@@ -386,6 +386,18 @@ warn_on_duplicate_source = true
 
 EPUB 导出会复制原始 EPUB，保留 CSS、图片和元数据，并替换 spine 章节中的译文节点。`ruby`、脚注链接、表格、代码块、图片文字等复杂结构会在 `quality-report` 的 `epub_markup_risk` 中提示；最终发布前建议运行 `validate-export`，并抽查 EPUB 阅读器效果。
 
+### 开发与验证
+
+本项目提供 GitHub Actions CI，会在 `main`、`perfect` 分支推送和 Pull Request 时运行编译、CLI 自省、测试和打包检查。本地开发可安装开发依赖后执行同样的核心验证：
+
+```bash
+python3 -m pip install -e ".[dev,epub]"
+python3 -m compileall app tests
+python3 main.py --agent-mode commands --json
+python3 -m pytest -q
+python3 -m build
+```
+
 ### 特别感谢
 
 本项目的流程设计、Agent 工作区思路和质量闭环设计参考了 [A.T.T MZ](https://github.com/yexi-by/att-mz)。特别感谢 A.T.T MZ 原作者 [yexi-by](https://github.com/yexi-by) 的开源项目与工作流启发。
