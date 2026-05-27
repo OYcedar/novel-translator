@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import hashlib
 import json
 import shutil
 
@@ -162,6 +163,16 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     combined_warnings = warnings + delivery_check.get("warnings", [])
     errors = delivery_check.get("errors", [])
     status = "error" if errors else ("warning" if combined_warnings else "ok")
+    files = {
+        "translated": _file_record(translated_path),
+        "quality_report": _file_record(quality_path),
+        "delivery_check": _file_record(delivery_check_path),
+        "run_report": _file_record(run_report_path),
+        "terms": _file_record(terms_path),
+        "memory_summary": _file_record(memory_path),
+    }
+    if epub_risk_path:
+        files["epub_risk_report"] = _file_record(Path(epub_risk_path))
     manifest = {
         "book": book.id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -179,6 +190,7 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
         "warnings": combined_warnings,
         "errors": errors,
         "delivery_check_summary": delivery_check.get("summary", {}),
+        "files": files,
     }
     manifest_path = output_dir / "delivery-manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -196,4 +208,13 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
             "ready": delivery_check["summary"].get("ready", False),
         },
         "details": manifest,
+    }
+
+
+def _file_record(path: Path) -> dict:
+    data = path.read_bytes()
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
     }

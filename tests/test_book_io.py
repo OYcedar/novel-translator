@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -860,6 +861,8 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert manifest["errors"][0]["code"] == "pending_translations"
     assert manifest["delivery_check_summary"]["pending"] == 1
     assert manifest["generated_at"]
+    assert manifest["files"]["translated"]["sha256"] == hashlib.sha256(Path(manifest["translated"]).read_bytes()).hexdigest()
+    assert manifest["files"]["delivery_check"]["bytes"] > 0
 
 
 def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: Path) -> None:
@@ -893,6 +896,8 @@ def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: 
     assert manifest["status"] == "ok"
     assert manifest["ready"] is True
     assert manifest["errors"] == []
+    assert manifest["files"]["translated"]["path"].endswith(f"{book.id}.txt")
+    assert len(manifest["files"]["translated"]["sha256"]) == 64
     assert delivery_report["summary"]["ready"] is True
 
 
