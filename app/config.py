@@ -24,6 +24,8 @@ class TranslationConfig:
     target_language: str = "zh-Hans"
     source_language: str = "auto"
     system_prompt_file: str = "prompts/novel_translation_system.md"
+    style_guide: str = "自然流畅的简体中文小说译文，忠实原意，避免生硬直译。"
+    dialogue_style: str = "符合中文网文/出版小说阅读习惯，称谓、语气和人物关系保持连续。"
     batch_max_chars: int = 4000
     retry_count: int = 3
     retry_delay: int = 2
@@ -144,6 +146,18 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         source_language=str(translation_raw.get("source_language", "auto")),
         system_prompt_file=str(
             translation_raw.get("system_prompt_file", "prompts/novel_translation_system.md")
+        ),
+        style_guide=str(
+            translation_raw.get(
+                "style_guide",
+                "自然流畅的简体中文小说译文，忠实原意，避免生硬直译。",
+            )
+        ),
+        dialogue_style=str(
+            translation_raw.get(
+                "dialogue_style",
+                "符合中文网文/出版小说阅读习惯，称谓、语气和人物关系保持连续。",
+            )
         ),
         batch_max_chars=int(translation_raw.get("batch_max_chars", 4000)),
         retry_count=int(translation_raw.get("retry_count", 3)),

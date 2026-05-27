@@ -51,18 +51,20 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 11. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
 12. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
 13. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
-14. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
-15. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
-16. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
-17. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
-18. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
-19. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
-20. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json` 和 `delivery-check --book <书籍ID> --format txt|epub --json`，确认 `delivery-check.summary.ready=true` 后，再优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --format txt|epub --json` 生成交付包，并运行 `verify-delivery --manifest <工作记录目录>/delivery/delivery-manifest.json --json` 校验交付文件完整性。
-21. EPUB 成品交付后运行 `validate-epub --path <成品.epub> --json`，确认 `valid_for_local_open=true`、`nav_broken_links=0`、`nav_empty_anchors=0`、`nav_linear_spine_count=0`、`spine_missing=0`、`mimetype_first=true`、`mimetype_uncompressed=true`、`toc_prefixed_namespace=false`、`metadata_description_source_residual=false`。通过后运行 `open-local --path <成品.epub> --json` 调起本机默认阅读器，确认阅读器窗口能打开、左侧目录能加载、首页或目录页能正常显示。
+14. 先确认 `setting.toml` 的 `[translation] style_guide`、`dialogue_style` 和 `quality_passes` 符合本书目标读者；真实翻译请求会把这些要求放入 `quality_profile`，用于约束文风、对话、忠实度和自查。
+15. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
+16. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
+17. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
+18. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
+19. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
+20. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
+21. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json` 和 `delivery-check --book <书籍ID> --format txt|epub --json`，确认 `delivery-check.summary.ready=true` 后，再优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --format txt|epub --json` 生成交付包，并运行 `verify-delivery --manifest <工作记录目录>/delivery/delivery-manifest.json --json` 校验交付文件完整性。
+22. EPUB 成品交付后运行 `validate-epub --path <成品.epub> --json`，确认 `valid_for_local_open=true`、`nav_broken_links=0`、`nav_empty_anchors=0`、`nav_linear_spine_count=0`、`spine_missing=0`、`mimetype_first=true`、`mimetype_uncompressed=true`、`toc_prefixed_namespace=false`、`metadata_description_source_residual=false`。通过后运行 `open-local --path <成品.epub> --json` 调起本机默认阅读器，确认阅读器窗口能打开、左侧目录能加载、首页或目录页能正常显示。
 
 ## 硬门槛
 
 - 未完成术语导入前，不启动真实模型翻译，除非用户明确要求跳过术语流程。
+- 小批量试翻前必须确认 `quality_profile` 的文风目标；如果用户要求特定题材口吻，先改 `setting.toml` 的 `style_guide` 或 `dialogue_style`。
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
 - `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
 - 交付前 `delivery-check` 不能是 `error` 且 `summary.ready` 必须为 `true`；`run-report.summary.failed` 必须为 0，`validate-export` 不能是 `error`。

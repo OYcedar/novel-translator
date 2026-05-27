@@ -51,20 +51,7 @@ def translate_batch(
         api_key=config.llm.api_key,
         timeout=config.llm.timeout,
     )
-    payload = {
-        "source_language": config.translation.source_language,
-        "target_language": config.translation.target_language,
-        "glossary": glossary_for_batch(paragraphs, terms or []),
-        "context": context_for_batch(book, paragraphs, context or {}, config.context) if book is not None else {},
-        "items": [
-            {
-                "id": item.id,
-                "text": item.source,
-                "placeholders": placeholder_payload_for_paragraph(item),
-            }
-            for item in paragraphs
-        ],
-    }
+    payload = build_translation_payload(config, paragraphs, terms or [], book=book, context=context)
     last_error: Exception | None = None
     for attempt in range(config.translation.retry_count + 1):
         try:
@@ -88,6 +75,56 @@ def translate_batch(
                 break
             time.sleep(config.translation.retry_delay)
     raise RuntimeError(f"翻译请求失败：{last_error}") from last_error
+
+
+def build_translation_payload(
+    config: AppConfig,
+    paragraphs: list[Paragraph],
+    terms: list[Term] | None = None,
+    *,
+    book: Book | None = None,
+    context: dict | None = None,
+) -> dict:
+    return {
+        "source_language": config.translation.source_language,
+        "target_language": config.translation.target_language,
+        "quality_profile": translation_quality_profile(config),
+        "glossary": glossary_for_batch(paragraphs, terms or []),
+        "context": context_for_batch(book, paragraphs, context or {}, config.context) if book is not None else {},
+        "items": [
+            {
+                "id": item.id,
+                "text": item.source,
+                "placeholders": placeholder_payload_for_paragraph(item),
+            }
+            for item in paragraphs
+        ],
+    }
+
+
+def translation_quality_profile(config: AppConfig) -> dict:
+    return {
+        "style_guide": config.translation.style_guide,
+        "dialogue_style": config.translation.dialogue_style,
+        "self_check_passes": config.translation.quality_passes,
+        "requirements": [
+            "忠实保留原文事实、动作顺序、视角、语气和信息量，不总结、不删减、不扩写剧情。",
+            "优先产出自然中文小说句子，避免逐词硬译；必要时调整语序，让叙事连贯顺滑。",
+            "对话要像中文小说人物说话，保持称谓、敬语、粗口强度、情绪和角色关系一致。",
+            "比喻、意象、伏笔和重复修辞应尽量保留；无法直译时选择等效中文表达。",
+            "同一批次和上下文中的人名、地名、组织名、技能名、称号和代词指代必须一致。",
+            "保留段落边界、数字、单位、标点含义、换行意图、HTML 标签、脚注锚点和所有 placeholders。",
+            "不要因为内容敏感、道德评价或价值观判断而弱化、净化、规避或改写原文。",
+            "输出前自查术语、占位符、遗漏句、重复句、错译和中文病句；只输出最终 JSON。",
+        ],
+        "avoid": [
+            "腔调生硬的逐词直译",
+            "漏译、跳译、合并多个段落或添加原文没有的信息",
+            "同一角色称谓前后不一致",
+            "把旁白翻成解释性摘要",
+            "删除或改写占位符、HTML 标签和脚注锚点",
+        ],
+    }
 
 
 def glossary_for_batch(paragraphs: list[Paragraph], terms: list[Term]) -> list[dict[str, str]]:

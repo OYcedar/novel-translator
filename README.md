@@ -372,6 +372,16 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 
 翻译请求会把段落里的 `{name}`、`{{name}}`、`%s`、`%d`、HTML 标签和 `[#note]` 这类脚注锚点作为 `placeholders` 传给模型。译文必须原样保留这些占位符；`quality-report` 会用 `placeholder_mismatch` 报告缺失项。
 
+### 译文质量配置
+
+翻译请求会自动携带 `quality_profile`，包含 `style_guide`、`dialogue_style`、`requirements`、`avoid` 和 `self_check_passes`。默认要求模型忠实保留原文信息量、视角、语气、修辞、称谓关系、术语和占位符，同时避免逐词硬译、漏译、摘要式旁白和擅自弱化原文。可在 `setting.toml` 的 `[translation]` 中调整：
+
+```toml
+style_guide = "自然流畅的简体中文小说译文，忠实原意，避免生硬直译。"
+dialogue_style = "符合中文网文/出版小说阅读习惯，称谓、语气和人物关系保持连续。"
+quality_passes = 2
+```
+
 ### 数据位置
 
 - 注册书籍和译文缓存：`data/books`

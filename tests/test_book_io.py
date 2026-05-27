@@ -25,7 +25,7 @@ from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, 
 from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
 from app.task_control import clear_stop, request_stop, stop_requested, task_status
 from app.terminology import Term, extract_term_candidates
-from app.translator import validate_llm_response
+from app.translator import build_translation_payload, validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
 
@@ -695,6 +695,35 @@ def test_validate_llm_response_detects_batch_problems() -> None:
     assert any("未知段落 ID" in item for item in warnings["warnings"])
 
 
+def test_translation_payload_includes_quality_profile_and_context(tmp_path: Path) -> None:
+    source = tmp_path / "payload.txt"
+    source.write_text("Alice said, \"Run!\"\n\n{name} stayed.", encoding="utf-8")
+    book = load_txt_book(source, title="Payload")
+    book.paragraphs[0].translated = "爱丽丝说：“快跑！”"
+    config = _app_config(Path("/tmp"))
+    term = Term(source="Alice", target="爱丽丝", category="name", note="主角")
+    context = {
+        "chapters": {
+            book.chapters[0].id: {
+                "title": "Payload",
+                "summary": "爱丽丝正在催促同伴离开。",
+            }
+        }
+    }
+
+    payload = build_translation_payload(config, [book.paragraphs[1]], [term], book=book, context=context)
+    quality_profile = payload["quality_profile"]
+
+    assert quality_profile["style_guide"]
+    assert quality_profile["dialogue_style"]
+    assert quality_profile["self_check_passes"] == config.translation.quality_passes
+    assert any("避免逐词硬译" in item for item in quality_profile["requirements"])
+    assert any("价值观判断" in item for item in quality_profile["requirements"])
+    assert any("逐词直译" in item for item in quality_profile["avoid"])
+    assert payload["context"]["chapter_summary"] == "爱丽丝正在催促同伴离开。"
+    assert payload["items"][0]["placeholders"][0]["value"] == "{name}"
+
+
 def test_run_report_and_failed_ids(tmp_path: Path) -> None:
     books_dir = tmp_path / "books"
     record_batch(
@@ -1125,6 +1154,8 @@ model = "model"
     assert config.automation.workers == 200
     assert config.automation.rpm == 200
     assert config.automation.tpm == 0
+    assert "生硬直译" in config.translation.style_guide
+    assert "称谓" in config.translation.dialogue_style
 
 
 def test_load_config_resolves_llm_from_environment(tmp_path: Path) -> None:
@@ -1163,6 +1194,8 @@ def test_example_config_uses_high_throughput_automation_defaults() -> None:
     assert config.automation.workers == 200
     assert config.automation.rpm == 200
     assert config.automation.tpm == 0
+    assert "生硬直译" in config.translation.style_guide
+    assert "称谓" in config.translation.dialogue_style
 
 
 def test_project_metadata_is_publishable() -> None:
