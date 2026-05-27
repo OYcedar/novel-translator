@@ -310,6 +310,7 @@ def build_parser() -> argparse.ArgumentParser:
     delivery = add_common(subparsers.add_parser("package-delivery", help="生成交付包"), json_flag=True)
     delivery.add_argument("--book", required=True)
     delivery.add_argument("--output-dir", type=Path, required=True)
+    delivery.add_argument("--format", choices=["txt", "epub"], help="交付包译本格式，默认跟随源书格式")
     add_export_mode_flags(delivery)
 
     export = add_common(subparsers.add_parser("export", help="导出译文"), json_flag=True)
@@ -494,7 +495,16 @@ def dispatch(args: argparse.Namespace) -> dict:
         return delivery_check(config, args)
     if args.command == "package-delivery":
         book = load_book(config.books_dir, args.book)
-        return package_delivery(config.books_dir, book, load_terms(config.books_dir, book.id), config.quality, config.epub, args.output_dir.expanduser().resolve(), bilingual=resolve_bilingual(config, args))
+        return package_delivery(
+            config.books_dir,
+            book,
+            load_terms(config.books_dir, book.id),
+            config.quality,
+            config.epub,
+            args.output_dir.expanduser().resolve(),
+            bilingual=resolve_bilingual(config, args),
+            export_format=args.format,
+        )
     if args.command == "export":
         return export_book(config, args)
     if args.command == "validate-export":

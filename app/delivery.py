@@ -100,6 +100,13 @@ def package_delivery(root_books_dir: Path, book: Book, terms: list[Term], qualit
     return {
         "status": "warning" if warnings or quality["status"] != "ok" else "ok",
         "warnings": warnings,
-        "summary": {"book": book.id, "output_dir": str(output_dir), "translated": str(translated_path), "manifest": str(manifest_path), "bilingual": bilingual},
+        "summary": {
+            "book": book.id,
+            "output_dir": str(output_dir),
+            "translated": str(translated_path),
+            "manifest": str(manifest_path),
+            "bilingual": bilingual,
+            "format": selected_format,
+        },
         "details": manifest,
     }

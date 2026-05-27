@@ -847,6 +847,34 @@ def test_snapshot_restore_and_delivery_package(tmp_path: Path) -> None:
     assert restore["summary"]["snapshot"] == snapshot["summary"]["snapshot_id"]
     assert (tmp_path / "delivery" / "delivery-manifest.json").exists()
     assert package["summary"]["output_dir"].endswith("delivery")
+    assert package["summary"]["format"] == "txt"
+
+
+def test_package_delivery_accepts_explicit_txt_format_for_epub_source(tmp_path: Path) -> None:
+    epub = tmp_path / "book.epub"
+    _write_epub(epub, chapter_body="<body><p>Hello.</p></body>")
+    book = load_epub_book(epub, title="EpubPackage")
+    config = _app_config(tmp_path)
+    save_book(config.books_dir, book, epub)
+    for paragraph in book.paragraphs:
+        paragraph.translated = "你好。"
+    from app.models import persist_book
+
+    persist_book(config.books_dir, book)
+    package = package_delivery(
+        config.books_dir,
+        book,
+        [],
+        _quality_config(),
+        EpubConfig(),
+        tmp_path / "delivery-txt",
+        export_format="txt",
+    )
+
+    assert package["status"] == "ok"
+    assert package["summary"]["format"] == "txt"
+    assert package["summary"]["translated"].endswith(".txt")
+    assert (tmp_path / "delivery-txt" / "translated" / f"{book.id}.txt").exists()
 
 
 def test_delivery_check_reports_ready_book(tmp_path: Path) -> None:

@@ -57,7 +57,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 17. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
 18. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
 19. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
-20. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json` 和 `delivery-check --book <书籍ID> --format txt|epub --json`，确认 `delivery-check.summary.ready=true` 后，再优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --json` 生成交付包。
+20. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json` 和 `delivery-check --book <书籍ID> --format txt|epub --json`，确认 `delivery-check.summary.ready=true` 后，再优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --format txt|epub --json` 生成交付包。
 21. EPUB 成品交付后运行 `validate-epub --path <成品.epub> --json`，确认 `valid_for_local_open=true`、`nav_broken_links=0`、`nav_empty_anchors=0`、`nav_linear_spine_count=0`、`spine_missing=0`、`mimetype_first=true`、`mimetype_uncompressed=true`、`toc_prefixed_namespace=false`、`metadata_description_source_residual=false`。通过后运行 `open-local --path <成品.epub> --json` 调起本机默认阅读器，确认阅读器窗口能打开、左侧目录能加载、首页或目录页能正常显示。
 
 ## 硬门槛
