@@ -550,7 +550,7 @@ def doctor(args: argparse.Namespace) -> dict:
         warnings.append(f"关键项目文件缺失：{', '.join(missing_files)}。")
     if not system_prompt_exists:
         warnings.append("系统提示词文件不存在，真实翻译前必须修复 translation.system_prompt_file。")
-    if config_loadable and automation.get("workers", 1) > 1 and automation.get("rpm", 30) <= 0:
+    if config_loadable and automation.get("workers", 200) > 1 and automation.get("rpm", 200) <= 0:
         warnings.append("启用并发但未设置 rpm 限速，可能触发模型服务限流。")
     status = "error" if errors else ("warning" if warnings else "ok")
     return {
@@ -1450,7 +1450,7 @@ def retry_failed(config: AppConfig, args: argparse.Namespace) -> dict:
         no_memory=True,
         run_id=args.run_id or new_run_id(),
         target_ids=ids,
-        workers=1,
+        workers=config.automation.workers,
         rpm=config.automation.rpm,
         tpm=config.automation.tpm,
         stop_on_warning=False,

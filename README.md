@@ -100,7 +100,7 @@ python3 main.py --agent-mode translation-plan --book <书籍ID> --json
 
 ```bash
 python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --json
-python3 main.py --agent-mode translate --book <书籍ID> --workers 1 --rpm 30 --json
+python3 main.py --agent-mode translate --book <书籍ID> --workers 200 --rpm 200 --json
 python3 main.py --agent-mode run-report --book <书籍ID> --json
 python3 main.py --agent-mode retry-failed --book <书籍ID> --json
 python3 main.py --agent-mode quality-report --book <书籍ID> --json
@@ -146,7 +146,7 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 | `python3 main.py --agent-mode summarize-context --book <书籍ID> --json` | 生成章节摘要，长篇小说建议翻译前执行。 |
 | `python3 main.py --agent-mode context-status --book <书籍ID> --json` | 检查章节上下文是否齐全。 |
 | `python3 main.py --agent-mode translation-plan --book <书籍ID> --json` | 根据画像、术语和上下文生成 Agent 执行建议。 |
-| `python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --workers 1 --rpm 30 --json` | 小批量试翻；确认质量后再去掉 `--max-batches 1` 全量翻译。 |
+| `python3 main.py --agent-mode translate --book <书籍ID> --max-batches 1 --workers 200 --rpm 200 --json` | 小批量试翻；确认质量后再去掉 `--max-batches 1` 全量翻译。 |
 | `python3 main.py --agent-mode run-report --book <书籍ID> --json` | 查看批次成功/失败、字符数、记忆命中和限速记录。 |
 | `python3 main.py --agent-mode export-run-report --book <书籍ID> --output ./run-report.md --json` | 导出 Markdown 运行报告，适合交付或人工复盘。 |
 | `python3 main.py --agent-mode failed-batches --book <书籍ID> --json` | 列出失败批次和对应段落 ID。 |

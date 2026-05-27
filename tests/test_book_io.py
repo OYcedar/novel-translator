@@ -876,7 +876,7 @@ def test_run_folder_dry_run_scans_without_registering(tmp_path: Path) -> None:
     assert not (tmp_path / "data").exists()
 
 
-def test_load_config_uses_conservative_automation_defaults(tmp_path: Path) -> None:
+def test_load_config_uses_high_throughput_automation_defaults(tmp_path: Path) -> None:
     config_path = tmp_path / "setting.toml"
     config_path.write_text(
         """
@@ -890,8 +890,8 @@ model = "model"
 
     config = load_config(tmp_path, config_path)
 
-    assert config.automation.workers == 1
-    assert config.automation.rpm == 30
+    assert config.automation.workers == 200
+    assert config.automation.rpm == 200
     assert config.automation.tpm == 0
 
 
@@ -924,17 +924,20 @@ model = "$OPENAI_MODEL"
     assert config.llm.model == "env-model"
 
 
-def test_example_config_uses_conservative_automation_defaults() -> None:
+def test_example_config_uses_high_throughput_automation_defaults() -> None:
     root = Path(__file__).resolve().parents[1]
     config = load_config(root, root / "setting.example.toml")
 
-    assert config.automation.workers == 1
-    assert config.automation.rpm == 30
+    assert config.automation.workers == 200
+    assert config.automation.rpm == 200
     assert config.automation.tpm == 0
 
 
 def test_project_metadata_is_publishable() -> None:
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
     root = Path(__file__).resolve().parents[1]
     metadata = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
