@@ -20,6 +20,7 @@ from app.manual import export_pending_translations, import_manual_translations, 
 from app.memory import export_memory, import_memory, load_memory, lookup_memory, remember_translation, terminology_hash
 from app.models import Paragraph, load_book, save_book
 from app.placeholders import extract_placeholders, placeholder_mismatches
+from app.quality import quality_report
 from app.review import apply_review_fixes, review_translations
 from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, run_report
 from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
@@ -834,6 +835,39 @@ def test_analysis_and_translation_plan_report_risks(tmp_path: Path) -> None:
     assert analysis["summary"]["duplicate_group_count"] == 1
     assert analysis["details"]["dialogue_ratio"] > 0
     assert plan["summary"]["needs_terminology"] is True
+
+
+def test_quality_report_flags_common_translation_quality_issues(tmp_path: Path) -> None:
+    source = tmp_path / "quality.txt"
+    source.write_text(
+        '"Alice opened the heavy wooden door and stepped into the moonlit corridor."\n\n'
+        "The traveler crossed the silent valley, remembered the old promise, and kept walking until dawn.\n\n"
+        "Bob looked back.",
+        encoding="utf-8",
+    )
+    book = load_txt_book(source, title="Quality")
+    book.paragraphs[0].translated = '"Alice opened the heavy wooden door and stepped into the moonlit corridor."'
+    book.paragraphs[1].translated = "他走了。"
+    book.paragraphs[2].translated = "鲍勃回头. 鲍勃回头."
+
+    report = quality_report(book, _quality_config(), [])
+    dialogue = report["details"]["dialogue_punctuation"][0]
+    literal_reasons = {
+        reason
+        for item in report["details"]["over_literal_translation"]
+        for reason in item["reasons"]
+    }
+    style_reasons = {
+        reason
+        for item in report["details"]["style_inconsistency"]
+        for reason in item["reasons"]
+    }
+
+    assert report["status"] == "warning"
+    assert dialogue["reasons"] == ["western_quote_in_dialogue"]
+    assert {"source_tokens_retained", "high_latin_ratio", "suspiciously_short_translation"} <= literal_reasons
+    assert {"western_sentence_period", "repeated_sentence"} <= style_reasons
+    assert report["summary"]["review_required"] == 3
 
 
 def test_review_translations_and_apply_fixes(tmp_path: Path) -> None:

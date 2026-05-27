@@ -53,12 +53,15 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
             if pattern.search(paragraph.translated):
                 residual.append({"id": paragraph.id, "pattern": pattern.pattern, "text": paragraph.translated})
                 break
-        if _dialogue_punctuation_issue(paragraph.source, paragraph.translated):
-            dialogue_punctuation.append({"id": paragraph.id, "text": paragraph.translated})
-        if _over_literal_issue(paragraph.source, paragraph.translated):
-            over_literal_translation.append({"id": paragraph.id, "text": paragraph.translated})
-        if _style_issue(paragraph.translated):
-            style_inconsistency.append({"id": paragraph.id, "text": paragraph.translated})
+        dialogue_reasons = _dialogue_punctuation_issues(paragraph.source, paragraph.translated)
+        if dialogue_reasons:
+            dialogue_punctuation.append({"id": paragraph.id, "reasons": dialogue_reasons, "text": paragraph.translated})
+        literal_reasons = _over_literal_issues(paragraph.source, paragraph.translated)
+        if literal_reasons:
+            over_literal_translation.append({"id": paragraph.id, "reasons": literal_reasons, "text": paragraph.translated})
+        style_reasons = _style_issues(paragraph.translated)
+        if style_reasons:
+            style_inconsistency.append({"id": paragraph.id, "reasons": style_reasons, "text": paragraph.translated})
     review_ids = set()
     for collection in (residual, terminology_mismatch, placeholder_mismatch, epub_markup_risk, style_inconsistency, dialogue_punctuation, over_literal_translation):
         for item in collection:
@@ -96,21 +99,72 @@ def quality_report(book: Book, config: QualityConfig, terms: list[Term] | None =
     }
 
 
-def _dialogue_punctuation_issue(source: str, translated: str) -> bool:
+def _dialogue_punctuation_issues(source: str, translated: str) -> list[str]:
+    issues = []
     has_dialogue = any(mark in source for mark in ('"', "“", "「", "『"))
     if not has_dialogue:
-        return False
-    return '"' in translated or translated.count("“") != translated.count("”")
+        return issues
+    if '"' in translated:
+        issues.append("western_quote_in_dialogue")
+    if translated.count("“") != translated.count("”"):
+        issues.append("unbalanced_chinese_quotes")
+    if translated.count("‘") != translated.count("’"):
+        issues.append("unbalanced_single_quotes")
+    return issues
 
 
-def _over_literal_issue(source: str, translated: str) -> bool:
+def _over_literal_issues(source: str, translated: str) -> list[str]:
+    issues = []
     if not source or not translated:
-        return False
+        return issues
     if source.strip() == translated.strip():
-        return True
+        issues.append("identical_to_source")
+    source_tokens = _latin_tokens(source)
+    translated_tokens = _latin_tokens(translated)
+    retained_tokens = sorted(source_tokens & translated_tokens)
+    if len(retained_tokens) >= 3:
+        issues.append("source_tokens_retained")
     ascii_letters = sum(1 for char in translated if ("A" <= char <= "Z") or ("a" <= char <= "z"))
-    return len(translated) > 10 and ascii_letters / max(len(translated), 1) > 0.35
+    if len(translated) > 10 and ascii_letters / max(len(translated), 1) > 0.35:
+        issues.append("high_latin_ratio")
+    source_chars = len(source.strip())
+    translated_chars = len(translated.strip())
+    if source_chars >= 80 and translated_chars < max(20, int(source_chars * 0.18)):
+        issues.append("suspiciously_short_translation")
+    return issues
 
 
-def _style_issue(translated: str) -> bool:
-    return "  " in translated or "。。" in translated or "，，" in translated
+def _style_issues(translated: str) -> list[str]:
+    issues = []
+    checks = {
+        "double_space": "  " in translated,
+        "duplicated_full_stop": "。。" in translated,
+        "duplicated_comma": "，，" in translated,
+        "western_comma_or_period": "，" not in translated and re.search(r"[A-Za-z\u4e00-\u9fff],[A-Za-z\u4e00-\u9fff]", translated) is not None,
+        "western_sentence_period": re.search(r"[\u4e00-\u9fff]\.", translated) is not None,
+        "repeated_sentence": _has_repeated_sentence(translated),
+    }
+    for reason, matched in checks.items():
+        if matched:
+            issues.append(reason)
+    return issues
+
+
+def _latin_tokens(text: str) -> set[str]:
+    return {
+        token.lower()
+        for token in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", text)
+        if token.lower() not in {"the", "and", "for", "you", "that", "this", "with", "his", "her"}
+    }
+
+
+def _has_repeated_sentence(text: str) -> bool:
+    parts = [item.strip() for item in re.split(r"[。！？!?.]+", text) if item.strip()]
+    seen = set()
+    for part in parts:
+        if len(part) < 4:
+            continue
+        if part in seen:
+            return True
+        seen.add(part)
+    return False

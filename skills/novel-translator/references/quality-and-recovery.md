@@ -7,9 +7,9 @@
 - `terminology_mismatch`: 原文命中术语表，但译文没有使用指定译名。
 - `placeholder_mismatch`: 原文中的占位符没有在译文中原样保留。
 - `epub_markup_risk`: EPUB 段落含 ruby、脚注链接、表格、代码块等复杂标记，导出后需要复核。
-- `style_inconsistency`: 译文存在明显格式或标点风格问题。
-- `dialogue_punctuation`: 对话引号或标点不符合中文小说习惯。
-- `over_literal_translation`: 译文疑似照搬原文或直译过重。
+- `style_inconsistency`: 译文存在明显格式或标点风格问题，详情中的 `reasons` 会标出双空格、重复标点、英文句点、重复句子等原因。
+- `dialogue_punctuation`: 对话引号或标点不符合中文小说习惯，详情中的 `reasons` 会标出英文引号、中文引号不配对等原因。
+- `over_literal_translation`: 译文疑似照搬原文、英文原词残留过多、译文异常过短或直译过重，详情中的 `reasons` 会标出具体触发原因。
 - `review_required`: 汇总需要审校复核的段落 ID。
 
 ## 处理顺序
