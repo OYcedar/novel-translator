@@ -33,6 +33,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 | 命令调用与成功判断 | `references/cli-command-contract.md` | 运行或排查任一 CLI 阶段前 |
 | 术语工程 | `references/terminology-workflow.md` | 导出、填写、审查或导入术语表前 |
 | 质量检查与恢复 | `references/quality-and-recovery.md` | `quality-report` 有 warning/error、需要人工修复或反馈定位时 |
+| 实战经验复盘 | `../../docs/translation-lessons.md` | 长篇 EPUB 交付、称呼校对、EPUB 实机兼容或成品验收前 |
 
 只读取当前阶段需要的参考文件，不要把参考资料全文复制进模型 prompt 或交付报告。
 
@@ -47,7 +48,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 7. 运行 `export-terminology --book <书籍ID> --output-dir <工作区> --json` 导出术语候选和上下文。
 8. 阅读 `terminology-workflow.md`，填写或审查 `<工作区>/terminology/glossary.json`。删除误判候选，补全人名、地名、组织名、能力名等稳定译名。
 9. 运行 `import-terminology --book <书籍ID> --input <工作区>/terminology/glossary.json --json` 导入术语表。导入用的外部术语文件也应通过 `work-records --collect-file` 复制到 `<工作记录目录>/imports/`。
-10. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。
+10. 运行 `terminology-status --book <书籍ID> --json`。有冲突先修术语表；空译名 warning 必须解释，不能假装已完成。术语表阶段必须做人称/称呼校对：日文 `さん`、`ちゃん`、`くん`、`さま` 等不要机械音译成“桑”“酱”，应按人物关系改为中文称呼、昵称、直呼姓名或省略。
 11. 运行 `prepare-agent-workspace --book <书籍ID> --output-dir <工作区> --json` 和 `validate-agent-workspace --book <书籍ID> --workspace <工作区> --json`，确认工作区完整。
 12. 运行 `audit-coverage --book <书籍ID> --json`，确认段落覆盖和可导出格式。
 13. 长篇小说先运行 `summarize-context --book <书籍ID> --json`，再运行 `context-status --book <书籍ID> --json`；缺章节摘要时不要直接全量翻译。
@@ -55,7 +56,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 15. 先小批量执行 `translate --book <书籍ID> --max-batches 1 --json`。如果只是验证流程，用 `--dry-run`，但不要把 dry-run 当真实译文。
 16. 查看 `run-report --book <书籍ID> --json`、`failed-batches --book <书籍ID> --json`、`translation-status --book <书籍ID> --json` 和 `quality-report --book <书籍ID> --json`。有失败批次时先 `retry-failed --book <书籍ID> --json` 或导出人工修复表。
 17. 小批量没有规则性事故后，再继续执行 `translate --book <书籍ID> --json`；长篇可设置 `--workers`、`--rpm`、`--stop-on-warning`。
-18. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、审校问题或 EPUB 标记风险必须处理或向用户说明。
+18. 直到 `pending` 为 0 后，再跑 `run-report`、`quality-report` 和 `review-translations --book <书籍ID> --mode risk --json`。未译、失败批次、源文残留、术语不一致、占位符缺失、人称/称呼问题、审校问题或 EPUB 标记风险必须处理或向用户说明。
 19. 审校 JSON 只在填写 `approved_translation` 后才可用 `apply-review-fixes` 写入；坏译文用 `reset-translations` 精确清空。
 20. 用户反馈漏翻/错翻时，用 `verify-feedback-text --book <书籍ID> --input <反馈文件> --json` 反查段落。
 21. 导出前运行 `validate-export --book <书籍ID> --format txt|epub --json` 和 `delivery-check --book <书籍ID> --format txt|epub --json`，确认 `delivery-check.summary.ready=true` 后，再优先用 `package-delivery --book <书籍ID> --output-dir <工作记录目录>/delivery --format txt|epub --json` 生成交付包，并运行 `verify-delivery --manifest <工作记录目录>/delivery/delivery-manifest.json --json` 校验交付文件完整性。
@@ -68,6 +69,7 @@ description: 执行 Novel Translator 的 EPUB/TXT 小说翻译流程：注册小
 - `quality-report` 仍有 `terminology_mismatch` 时，不把译文称为最终版。
 - `quality-report` 仍有 `placeholder_mismatch` 时，不把译文称为最终版；占位符必须原样保留。
 - 交付前 `delivery-check` 不能是 `error` 且 `summary.ready` 必须为 `true`；`run-report.summary.failed` 必须为 0，`validate-export` 不能是 `error`。
+- `quality-report` 仍有 `person_address_issue` 时，不把译文称为最终版；日文敬称音译残留、称呼不合中文语境、人物关系称谓不连续必须进入审校队列。
 - EPUB 成品交付前 `validate-epub` 不能是 `error`；目录/nav/toc 断链、空目录锚点、spine 缺失、mimetype 非首项或被压缩都必须先修复或明确说明。`toc.ncx` 必须保持默认 NCX 命名空间，不能导出成 `<ns0:ncx>`，否则部分 Android 阅读器会报 `LoadTocError`。`nav.xhtml` 不能保留在线性阅读顺序中，必须是 `linear="no"` 或不在线性 spine 内，否则部分手机阅读器会把整本目录当作第一章正文。通过机器校验后还要用 `open-local` 做一次本机阅读器实开验证；能看到目录和页面内容才算 EPUB 打开测试通过。
 - EPUB 的 OPF 元数据也属于交付内容，`dc:title`、`dc:description`、`dc:language` 应随译本更新；手机书籍详情页显示的简介不能残留日文假名。
 - EPUB 有 `epub_markup_risk` 时，交付包必须包含 `export-epub-risk-report` 生成的风险报告。

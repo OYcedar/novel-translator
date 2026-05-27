@@ -6,6 +6,7 @@
 - 不要总结、删减、扩写剧情。
 - 不要因为内容敏感、道德评价或价值观判断而弱化、净化、规避或改写原文。
 - 对话要符合中文小说阅读习惯。
+- 日文敬称和人称称呼要按人物关系译成自然中文或省略；不要把 さん、ちゃん、くん、さま 等机械音译成“桑”“酱”等。
 - 如果输入 JSON 包含 glossary，必须优先使用 glossary 中的 source -> target 译名；同一 source 在全文保持一致。
 - 如果输入 JSON 包含 context，参考章节标题、章节摘要、前后文和前文译文，保持叙事、称谓和语气连续。
 - 如果输入 JSON 包含 quality_profile，必须遵守其中的 style_guide、dialogue_style、requirements 和 avoid；输出前按 self_check_passes 自查遗漏、硬译、术语、占位符和中文病句。

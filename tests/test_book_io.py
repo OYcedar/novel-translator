@@ -25,7 +25,7 @@ from app.review import apply_review_fixes, review_translations
 from app.runs import failed_batches, latest_failed_paragraph_ids, record_batch, run_report
 from app.snapshots import create_snapshot, list_snapshots, restore_snapshot
 from app.task_control import clear_stop, request_stop, stop_requested, task_status
-from app.terminology import Term, extract_term_candidates
+from app.terminology import Term, extract_term_candidates, validate_terms
 from app.translator import build_translation_payload, validate_llm_response
 from app.workspace import prepare_agent_workspace, validate_agent_workspace
 
@@ -897,6 +897,76 @@ def test_quality_report_flags_common_translation_quality_issues(tmp_path: Path) 
     assert {"source_tokens_retained", "high_latin_ratio", "suspiciously_short_translation"} <= literal_reasons
     assert {"western_sentence_period", "repeated_sentence"} <= style_reasons
     assert report["summary"]["review_required"] == 3
+
+
+def test_validate_terms_warns_on_honorific_transliteration() -> None:
+    terms = [Term(source="ミーリスさん", target="米莉丝桑", category="name")]
+
+    errors, warnings = validate_terms(terms)
+
+    assert errors == []
+    assert any("日式敬称" in warning or "敬称音译" in warning for warning in warnings)
+
+
+def test_quality_report_flags_person_address_issues(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("ミーリスさんは笑った。\n\nレンカちゃんも頷いた。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "米莉丝桑笑了。"
+    book.paragraphs[1].translated = "莲华酱也点了点头。"
+
+    report = quality_report(book, _quality_config(), [])
+
+    assert report["summary"]["person_address_issue"] == 2
+    assert report["summary"]["review_required"] == 2
+    assert {item["id"] for item in report["details"]["person_address_issue"]} == {book.paragraphs[0].id, book.paragraphs[1].id}
+
+
+def test_quality_report_allows_native_chinese_spouse_address(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("旦那様は振り返った。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "夫君回过头。"
+
+    report = quality_report(book, _quality_config(), [])
+    errors, warnings = validate_terms([Term(source="旦那様", target="夫君", category="address")])
+
+    assert report["summary"]["person_address_issue"] == 0
+    assert errors == []
+    assert warnings == []
+
+
+def test_quality_report_allows_native_chinese_lord_address(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("主君への忠誠を誓った。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "她向主君宣誓忠诚。"
+
+    report = quality_report(book, _quality_config(), [])
+
+    assert report["summary"]["person_address_issue"] == 0
+
+
+def test_quality_report_allows_chinese_monarch_word(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("国主は頭を下げた。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "一国之主不会轻易低头，对同为君主的人尚且如此。"
+
+    report = quality_report(book, _quality_config(), [])
+
+    assert report["summary"]["person_address_issue"] == 0
+
+
+def test_quality_report_allows_common_chinese_sauce_and_carbonated_words(tmp_path: Path) -> None:
+    source = tmp_path / "novel.txt"
+    source.write_text("炭酸入り果実水を飲む。甘辛のタレで味付けした。", encoding="utf-8")
+    book = load_txt_book(source, title="Persona")
+    book.paragraphs[0].translated = "她喝下碳酸果汁水，又用甜辣酱调味。"
+
+    report = quality_report(book, _quality_config(), [])
+
+    assert report["summary"]["person_address_issue"] == 0
 
 
 def test_review_translations_and_apply_fixes(tmp_path: Path) -> None:

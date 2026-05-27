@@ -7,6 +7,7 @@ import json
 import re
 
 from app.models import Book, book_dir
+from app.persona import terminology_address_warnings
 
 
 @dataclass
@@ -192,6 +193,7 @@ def validate_terms(terms: list[Term]) -> tuple[list[str], list[str]]:
         sources = {item.source for item in items}
         if target and len(sources) > 1:
             warnings.append(f"译名 {target} 对应多个原文：{', '.join(sorted(sources))}")
+    warnings.extend(terminology_address_warnings(terms))
     return errors, warnings
 
 
