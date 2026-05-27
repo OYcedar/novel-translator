@@ -933,6 +933,18 @@ def test_example_config_uses_conservative_automation_defaults() -> None:
     assert config.automation.tpm == 0
 
 
+def test_project_metadata_is_publishable() -> None:
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    metadata = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+
+    assert metadata["readme"] == "README.md"
+    assert metadata["license"] == "MIT"
+    assert metadata["urls"]["Repository"] == "https://github.com/OYcedar/novel-translator"
+    assert (root / "LICENSE").exists()
+
+
 def test_command_catalog_lists_parser_commands() -> None:
     parser_commands = _parser_command_names()
     report = command_catalog()
@@ -965,6 +977,7 @@ model = "model"
     assert report["summary"]["commands"] == len(_parser_command_names())
     assert report["summary"]["ci_configured"] is True
     assert report["details"]["required_files"]["readme"] is True
+    assert report["details"]["required_files"]["license"] is True
     assert "api_key" not in str(report)
 
 

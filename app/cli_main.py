@@ -494,6 +494,7 @@ def doctor(args: argparse.Namespace) -> dict:
     required_files = {
         "pyproject": ROOT / "pyproject.toml",
         "readme": ROOT / "README.md",
+        "license": ROOT / "LICENSE",
         "system_prompt": ROOT / "prompts/novel_translation_system.md",
         "skill": ROOT / "skills/novel-translator/SKILL.md",
         "ci": ROOT / ".github/workflows/ci.yml",

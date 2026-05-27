@@ -367,6 +367,10 @@ python3 main.py --agent-mode package-delivery --book <书籍ID> --output-dir ./d
 - 原始文件副本：`data/books/<书籍ID>/source.epub` 或 `source.txt`
 - 系统提示词：`prompts/novel_translation_system.md`
 
+### 许可证
+
+本项目使用 MIT License，详见 `LICENSE`。
+
 ### EPUB 说明
 
 EPUB 导入会读取 OPF manifest/spine，支持 EPUB2 `toc.ncx`、EPUB3 `nav.xhtml`、`.xhtml`、`.html` 和 `.htm` 章节。导入时会为每个可翻译节点保存 `chapter_path`、`node_index`、`node_tag`、`node_id`、`node_class` 和 `text_hash`，导出时按节点定位回写，重复原文也能写回正确位置。

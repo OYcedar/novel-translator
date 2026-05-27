@@ -2,11 +2,33 @@
 name = "novel-translator"
 version = "0.1.0"
 description = "Agent-friendly novel translation toolkit for EPUB and TXT books"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "OYcedar" },
+]
+keywords = ["agent", "epub", "novel", "translation", "txt"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+    "Topic :: Utilities",
+]
 dependencies = [
     "openai>=2.0.0",
     "rich>=13.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/OYcedar/novel-translator"
+Repository = "https://github.com/OYcedar/novel-translator"
+Issues = "https://github.com/OYcedar/novel-translator/issues"
 
 [project.optional-dependencies]
 epub = [
