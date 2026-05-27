@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import ast
+import os
 
 try:
     import tomllib
@@ -124,9 +125,18 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
     quality_raw = raw.get("quality", {})
     epub_raw = raw.get("epub", {})
     llm = LlmConfig(
-        base_url=str(llm_raw.get("base_url", "")).rstrip("/"),
-        api_key=str(llm_raw.get("api_key", "")),
-        model=str(llm_raw.get("model", "")),
+        base_url=resolve_config_value(
+            llm_raw.get("base_url", ""),
+            ("NOVEL_TRANSLATOR_BASE_URL", "OPENAI_BASE_URL"),
+        ).rstrip("/"),
+        api_key=resolve_config_value(
+            llm_raw.get("api_key", ""),
+            ("NOVEL_TRANSLATOR_API_KEY", "OPENAI_API_KEY"),
+        ),
+        model=resolve_config_value(
+            llm_raw.get("model", ""),
+            ("NOVEL_TRANSLATOR_MODEL", "OPENAI_MODEL"),
+        ),
         timeout=int(llm_raw.get("timeout", 600)),
     )
     translation = TranslationConfig(
@@ -181,6 +191,30 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         inline_safe_tags=tuple(str(item) for item in epub_raw.get("inline_safe_tags", ["span", "strong", "em", "a"])),
     )
     return AppConfig(root=root, llm=llm, translation=translation, context=context, review=review, automation=automation, export=export, quality=quality, epub=epub)
+
+
+def resolve_config_value(value: object, env_names: tuple[str, ...], default: str = "") -> str:
+    configured = str(value or "").strip()
+    env_name = _explicit_env_name(configured)
+    if env_name:
+        return os.environ.get(env_name, default).strip()
+    if configured and configured not in {"YOUR_API_KEY", "<API Key>", "<模型服务地址>", "<模型名>"}:
+        return configured
+    for candidate in env_names:
+        env_value = os.environ.get(candidate, "").strip()
+        if env_value:
+            return env_value
+    return "" if configured in {"YOUR_API_KEY", "<API Key>", "<模型服务地址>", "<模型名>"} else configured or default
+
+
+def _explicit_env_name(value: str) -> str:
+    if value.startswith("env:"):
+        return value[4:].strip()
+    if value.startswith("${") and value.endswith("}"):
+        return value[2:-1].strip()
+    if value.startswith("$") and len(value) > 1:
+        return value[1:].strip()
+    return ""
 
 
 def load_toml(path: Path) -> dict:

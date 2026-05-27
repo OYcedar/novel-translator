@@ -1,7 +1,7 @@
 [llm]
-base_url = "https://api.example.com/v1"
-api_key = "YOUR_API_KEY"
-model = "example-model"
+base_url = "$OPENAI_BASE_URL"
+api_key = "$OPENAI_API_KEY"
+model = "$OPENAI_MODEL"
 timeout = 600
 
 [translation]

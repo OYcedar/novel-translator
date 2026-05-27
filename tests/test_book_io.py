@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import os
 import re
 import zipfile
 
@@ -892,6 +893,35 @@ model = "model"
     assert config.automation.workers == 1
     assert config.automation.rpm == 30
     assert config.automation.tpm == 0
+
+
+def test_load_config_resolves_llm_from_environment(tmp_path: Path) -> None:
+    config_path = tmp_path / "setting.toml"
+    config_path.write_text(
+        """
+[llm]
+base_url = "$OPENAI_BASE_URL"
+api_key = "$OPENAI_API_KEY"
+model = "$OPENAI_MODEL"
+""".strip(),
+        encoding="utf-8",
+    )
+    old_values = {key: os.environ.get(key) for key in ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL")}
+    try:
+        os.environ["OPENAI_BASE_URL"] = "https://api.example.com/v1/"
+        os.environ["OPENAI_API_KEY"] = "env-key"
+        os.environ["OPENAI_MODEL"] = "env-model"
+        config = load_config(tmp_path, config_path)
+    finally:
+        for key, value in old_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    assert config.llm.base_url == "https://api.example.com/v1"
+    assert config.llm.api_key == "env-key"
+    assert config.llm.model == "env-model"
 
 
 def test_example_config_uses_conservative_automation_defaults() -> None:
