@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import subprocess
@@ -480,18 +481,89 @@ def dispatch(args: argparse.Namespace) -> dict:
 
 
 def doctor(args: argparse.Namespace) -> dict:
-    config_exists = (args.config or ROOT / "setting.toml").exists()
+    config_path = (args.config or ROOT / "setting.toml").expanduser()
+    if not config_path.is_absolute():
+        config_path = (ROOT / config_path).resolve()
+    config_exists = config_path.exists()
     example_exists = (ROOT / "setting.example.toml").exists()
+    required_files = {
+        "pyproject": ROOT / "pyproject.toml",
+        "readme": ROOT / "README.md",
+        "system_prompt": ROOT / "prompts/novel_translation_system.md",
+        "skill": ROOT / "skills/novel-translator/SKILL.md",
+        "ci": ROOT / ".github/workflows/ci.yml",
+    }
+    required_file_status = {name: path.exists() for name, path in required_files.items()}
+    python_supported = sys.version_info >= (3, 11)
+    config_loadable = False
+    config_error = ""
+    llm_configured = False
+    system_prompt_exists = required_file_status["system_prompt"]
+    automation = {}
+    if config_exists:
+        try:
+            loaded = load_config(ROOT, config_path)
+            config_loadable = True
+            llm_configured = bool(
+                loaded.llm.base_url
+                and loaded.llm.model
+                and loaded.llm.api_key
+                and loaded.llm.api_key not in {"YOUR_API_KEY", "<API Key>"}
+            )
+            system_prompt_exists = loaded.system_prompt_path.exists()
+            automation = {
+                "workers": loaded.automation.workers,
+                "rpm": loaded.automation.rpm,
+                "tpm": loaded.automation.tpm,
+                "stop_on_warning": loaded.automation.stop_on_warning,
+            }
+        except Exception as error:
+            config_error = f"{type(error).__name__}: {error}"
+    optional_dependencies = {
+        "beautifulsoup4": importlib.util.find_spec("bs4") is not None,
+        "lxml": importlib.util.find_spec("lxml") is not None,
+        "pytest": importlib.util.find_spec("pytest") is not None,
+        "build": importlib.util.find_spec("build") is not None,
+    }
+    warnings = []
+    errors = []
+    if not config_exists:
+        warnings.append("setting.toml 不存在，复制 setting.example.toml 后填写模型配置。")
+    elif not config_loadable:
+        errors.append({"code": "config_invalid", "message": config_error})
+    elif not llm_configured:
+        warnings.append("LLM 配置未完整填写 base_url、api_key 和 model，真实翻译前必须补齐。")
+    if not python_supported:
+        warnings.append("当前 Python 版本低于项目声明的 3.11，建议切换到 Python 3.11 或 3.12。")
+    missing_files = [name for name, exists in required_file_status.items() if not exists]
+    if missing_files:
+        warnings.append(f"关键项目文件缺失：{', '.join(missing_files)}。")
+    if not system_prompt_exists:
+        warnings.append("系统提示词文件不存在，真实翻译前必须修复 translation.system_prompt_file。")
+    if config_loadable and automation.get("workers", 1) > 1 and automation.get("rpm", 30) <= 0:
+        warnings.append("启用并发但未设置 rpm 限速，可能触发模型服务限流。")
+    status = "error" if errors else ("warning" if warnings else "ok")
     return {
-        "status": "ok" if config_exists else "warning",
-        "warnings": [] if config_exists else ["setting.toml 不存在，复制 setting.example.toml 后填写模型配置。"],
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
         "summary": {
             "root": str(ROOT),
+            "config": str(config_path),
             "config_exists": config_exists,
+            "config_loadable": config_loadable,
+            "llm_configured": llm_configured,
             "example_exists": example_exists,
             "python": sys.version.split()[0],
+            "python_supported": python_supported,
+            "commands": command_catalog()["summary"]["commands"],
+            "ci_configured": required_file_status["ci"],
         },
-        "details": {},
+        "details": {
+            "required_files": required_file_status,
+            "optional_dependencies": optional_dependencies,
+            "automation": automation,
+        },
     }
 
 

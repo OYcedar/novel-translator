@@ -7,7 +7,7 @@ import zipfile
 
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
-from app.cli_main import build_parser, command_catalog, retry_failed, run_folder
+from app.cli_main import build_parser, command_catalog, doctor, retry_failed, run_folder
 from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
@@ -912,6 +912,39 @@ def test_command_catalog_lists_parser_commands() -> None:
     assert report["summary"]["commands"] == len(parser_commands)
     assert catalog_commands == parser_commands
     assert {"doctor", "commands", "translate", "quality-report", "package-delivery"} <= catalog_commands
+
+
+def test_doctor_reports_project_health_for_valid_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "setting.toml"
+    config_path.write_text(
+        """
+[llm]
+base_url = "https://api.example.com/v1"
+api_key = "real-key"
+model = "model"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    report = doctor(argparse.Namespace(config=config_path))
+
+    assert report["status"] in {"ok", "warning"}
+    assert report["summary"]["config_exists"] is True
+    assert report["summary"]["config_loadable"] is True
+    assert report["summary"]["llm_configured"] is True
+    assert report["summary"]["commands"] == len(_parser_command_names())
+    assert report["summary"]["ci_configured"] is True
+    assert report["details"]["required_files"]["readme"] is True
+    assert "api_key" not in str(report)
+
+
+def test_doctor_warns_for_missing_config(tmp_path: Path) -> None:
+    report = doctor(argparse.Namespace(config=tmp_path / "missing.toml"))
+
+    assert report["status"] == "warning"
+    assert report["summary"]["config_exists"] is False
+    assert report["summary"]["config_loadable"] is False
+    assert any("setting.toml 不存在" in warning for warning in report["warnings"])
 
 
 def test_documented_agent_commands_exist_in_parser() -> None:
