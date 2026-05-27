@@ -7,7 +7,7 @@ import zipfile
 from app.analysis import analyze_book, translation_plan
 from app.book_io import export_epub, export_txt, inspect_epub, load_epub_book, load_txt_book, validate_epub
 from app.cli_main import retry_failed, run_folder
-from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig
+from app.config import AppConfig, AutomationConfig, ContextConfig, EpubConfig, ExportConfig, LlmConfig, QualityConfig, ReviewConfig, TranslationConfig, load_config
 from app.context import context_for_batch, context_status, summarize_context
 from app.delivery import package_delivery
 from app.feedback import verify_feedback_text
@@ -872,6 +872,34 @@ def test_run_folder_dry_run_scans_without_registering(tmp_path: Path) -> None:
     assert report["summary"]["files"] == 1
     assert report["summary"]["bilingual"] is True
     assert not (tmp_path / "data").exists()
+
+
+def test_load_config_uses_conservative_automation_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "setting.toml"
+    config_path.write_text(
+        """
+[llm]
+base_url = "https://api.example.com/v1"
+api_key = "key"
+model = "model"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(tmp_path, config_path)
+
+    assert config.automation.workers == 1
+    assert config.automation.rpm == 30
+    assert config.automation.tpm == 0
+
+
+def test_example_config_uses_conservative_automation_defaults() -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = load_config(root, root / "setting.example.toml")
+
+    assert config.automation.workers == 1
+    assert config.automation.rpm == 30
+    assert config.automation.tpm == 0
 
 
 def report_context(books_dir: Path, book_id: str) -> dict:

@@ -157,8 +157,8 @@ def load_config(root: Path, config_path: Path | None = None) -> AppConfig:
         severity_threshold=str(review_raw.get("severity_threshold", "medium")),
     )
     automation = AutomationConfig(
-        workers=int(automation_raw.get("workers", 200)),
-        rpm=int(automation_raw.get("rpm", 200)),
+        workers=int(automation_raw.get("workers", 1)),
+        rpm=int(automation_raw.get("rpm", 30)),
         tpm=int(automation_raw.get("tpm", 0)),
         stop_on_warning=bool(automation_raw.get("stop_on_warning", False)),
         auto_retry_failed=bool(automation_raw.get("auto_retry_failed", True)),

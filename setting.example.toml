@@ -27,8 +27,8 @@ max_items_per_run = 200
 severity_threshold = "medium"
 
 [automation]
-workers = 200
-rpm = 200
+workers = 1
+rpm = 30
 tpm = 0
 stop_on_warning = false
 auto_retry_failed = true
